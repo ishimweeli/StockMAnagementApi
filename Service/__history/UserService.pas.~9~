@@ -1,0 +1,228 @@
+unit UserService;
+
+interface
+
+uses
+  System.SysUtils, System.Classes, System.Hash,
+  UserModel, DatabaseModule,
+  FireDAC.Comp.Client, FireDAC.Stan.Param;
+
+type
+  TAuthResponse = record
+    Success: Boolean;
+    Token: string;
+    User: TUser;
+    ErrorMessage: string;
+  end;
+
+  TAuthService = class
+  public
+    function Register(const Username, Password, Email: string; Role: TUserRole): TAuthResponse;
+    function Login(const Username, Password: string): TAuthResponse;
+  private
+    function GenerateToken(const UserId: Integer; const Username: string): string;
+    function HashPassword(const Password: string): string;
+    function ValidateCredentials(const Username, Password: string): Boolean;
+    function UserExists(const Username, Email: string): Boolean;
+    function ValidateInput(const Username, Password, Email: string): Boolean;
+    function ToJsonResponse(const Response: TAuthResponse): string; // New method
+  end;
+
+implementation
+
+function TAuthService.GenerateToken(const UserId: Integer; const Username: string): string;
+begin
+  Result := THashSHA2.GetHashString(
+    Format('%d:%s:%s', [UserId, Username, FormatDateTime('yyyymmddhhnnss', Now)]),
+    SHA256);
+end;
+
+function TAuthService.HashPassword(const Password: string): string;
+begin
+  Result := THashSHA2.GetHashString(Password, SHA256);
+end;
+
+function TAuthService.ValidateInput(const Username, Password, Email: string): Boolean;
+begin
+  Result := (Length(Username) >= 3) and (Length(Password) >= 6) and
+            (Pos('@', Email) > 1) and (Pos('.', Email) > Pos('@', Email) + 1);
+end;
+
+function TAuthService.UserExists(const Username, Email: string): Boolean;
+var
+  Query: TFDQuery;
+begin
+  Result := False;
+  if (Username = '') and (Email = '') then
+    Exit;
+
+  Query := DatabaseModule1.CreateQuery;
+  try
+    Query.SQL.Text := 'SELECT 1 FROM users WHERE username = :username OR email = :email';
+    Query.ParamByName('username').AsString := Username;
+    Query.ParamByName('email').AsString := Email;
+    Query.Open;
+    Result := not Query.IsEmpty;
+  finally
+    Query.Free;
+  end;
+end;
+
+function TAuthService.ValidateCredentials(const Username, Password: string): Boolean;
+var
+  Query: TFDQuery;
+  StoredHash: string;
+begin
+  Result := False;
+  if (Username = '') or (Password = '') then
+    Exit;
+
+  Query := DatabaseModule1.CreateQuery;
+  try
+    Query.SQL.Text := 'SELECT password FROM users WHERE username = :username';
+    Query.ParamByName('username').AsString := Username;
+    Query.Open;
+
+    if not Query.IsEmpty then
+    begin
+      StoredHash := Query.FieldByName('password').AsString;
+      Result := StoredHash = HashPassword(Password);
+    end;
+  finally
+    Query.Free;
+  end;
+end;
+
+function TAuthService.Register(const Username, Password, Email: string;
+  Role: TUserRole): TAuthResponse;
+var
+  Query: TFDQuery;
+begin
+  Result.Success := False;
+  Result.User := nil;
+  Result.Token := '';
+  Result.ErrorMessage := '';
+
+  // Validate input first
+  if not ValidateInput(Username, Password, Email) then
+  begin
+    Result.ErrorMessage := 'Invalid input data';
+    Exit;
+  end;
+
+  // Check if user already exists
+  if UserExists(Username, Email) then
+  begin
+    Result.ErrorMessage := 'Username or email already exists';
+    Exit;
+  end;
+
+  // Begin transaction and create user
+  DatabaseModule1.StartTransaction;
+  Query := DatabaseModule1.CreateQuery;
+  try
+    try
+      Query.SQL.Text :=
+        'INSERT INTO users (username, password, email, role, created_at) ' +
+        'VALUES (:username, :password, :email, :role, :created_at)';
+
+      Query.ParamByName('username').AsString := Username;
+      Query.ParamByName('password').AsString := HashPassword(Password);
+      Query.ParamByName('email').AsString := Email;
+      Query.ParamByName('role').AsInteger := Ord(Role);
+      Query.ParamByName('created_at').AsDateTime := Now;
+      Query.ExecSQL;
+
+      Result.User := TUser.Create;
+      Result.User.Id := DatabaseModule1.GetConnection.GetLastAutoGenValue('users');
+      Result.User.Username := Username;
+      Result.User.Email := Email;
+      Result.User.Role := Role;
+      Result.Token := GenerateToken(Result.User.Id, Username);
+      Result.Success := True;
+
+      DatabaseModule1.Commit;
+    except
+      on E: Exception do
+      begin
+        DatabaseModule1.Rollback;
+        FreeAndNil(Result.User);
+        Result.Success := False;
+        Result.ErrorMessage := 'Registration failed: ' + E.Message;
+      end;
+    end;
+  finally
+    Query.Free;
+  end;
+end;
+
+function TAuthService.Login(const Username, Password: string): TAuthResponse;
+var
+  Query: TFDQuery;
+begin
+  Result.Success := False;
+  Result.User := nil;
+  Result.Token := '';
+  Result.ErrorMessage := '';
+
+  // First validate credentials
+  if not ValidateCredentials(Username, Password) then
+  begin
+    Result.ErrorMessage := 'Invalid credentials';
+    Exit;
+  end;
+
+  Query := DatabaseModule1.CreateQuery;
+  try
+    try
+      Query.SQL.Text := 'SELECT * FROM users WHERE username = :username';
+      Query.ParamByName('username').AsString := Username;
+      Query.Open;
+
+      if Query.IsEmpty then
+      begin
+        Result.ErrorMessage := 'User not found';
+        Exit;
+      end;
+
+      Result.User := TUser.Create;
+      try
+        Result.User.Id := Query.FieldByName('id').AsInteger;
+        Result.User.Username := Query.FieldByName('username').AsString;
+        Result.User.Email := Query.FieldByName('email').AsString;
+        Result.User.Role := TUserRole(Query.FieldByName('role').AsInteger);
+        Result.Token := GenerateToken(Result.User.Id, Username);
+        Result.Success := True;
+      except
+        on E: Exception do
+        begin
+          FreeAndNil(Result.User);
+          raise;
+        end;
+      end;
+    except
+      on E: Exception do
+      begin
+        Result.Success := False;
+        Result.ErrorMessage := 'Login failed: ' + E.Message;
+        FreeAndNil(Result.User);
+      end;
+    end;
+  finally
+    Query.Free;
+  end;
+end;
+
+function TAuthService.ToJsonResponse(const Response: TAuthResponse): string;
+begin
+  Result := '{"Success": ' + BoolToStr(Response.Success, True) + ', ' +
+            '"Token": "' + Response.Token + '", ' +
+            '"User": { "Id": ' + IntToStr(Response.User.Id) + ', ' +
+            '"Username": "' + Response.User.Username + '", ' +
+            '"Email": "' + Response.User.Email + '", ' +
+            '"Role": ' + IntToStr(Ord(Response.User.Role)) + ' }, ' +
+            '"ErrorMessage": "' + Response.ErrorMessage + '" }';
+end;
+
+end.
+

@@ -1,0 +1,124 @@
+unit ProductController;
+
+interface
+
+uses
+  Horse,
+  System.JSON,
+  System.SysUtils,
+  System.Generics.Collections,
+  ProductService,
+  ProductModel;
+
+type
+  TStockController = class
+  private
+    FStockService: TStockService;
+  public
+    constructor Create(AStockService: TStockService);
+    procedure AddItem(Req: THorseRequest; Res: THorseResponse);
+    procedure SellItem(Req: THorseRequest; Res: THorseResponse);
+    procedure GetItems(Req: THorseRequest; Res: THorseResponse);
+  end;
+
+implementation
+
+constructor TStockController.Create(AStockService: TStockService);
+begin
+  FStockService := AStockService;
+end;
+
+procedure TStockController.AddItem(Req: THorseRequest; Res: THorseResponse);
+var
+  JsonObj: TJSONObject;
+  Item: TItem;
+begin
+  JsonObj := TJSONObject.ParseJSONValue(Req.Body) as TJSONObject;
+  try
+    Item := TItem.Create;
+    try
+      Item.Name := JsonObj.GetValue('name').Value;
+      Item.Quantity := StrToInt(JsonObj.GetValue('quantity').Value);
+      Item.Price := StrToFloat(JsonObj.GetValue('price').Value);
+
+      if FStockService.AddItem(Item) then
+        Res.Send<TJSONObject>(
+          TJSONObject.Create
+            .AddPair('success', TJSONBool.Create(True))
+        )
+      else
+        Res.Status(500).Send<TJSONObject>(
+          TJSONObject.Create
+            .AddPair('success', TJSONBool.Create(False))
+            .AddPair('message', 'Failed to add item')
+        );
+    finally
+      Item.Free;
+    end;
+  finally
+    JsonObj.Free;
+  end;
+end;
+
+procedure TStockController.SellItem(Req: THorseRequest; Res: THorseResponse);
+var
+  JsonObj: TJSONObject;
+  ItemId, Quantity: Integer;
+  Notification: TStockNotification;
+begin
+  JsonObj := TJSONObject.ParseJSONValue(Req.Body) as TJSONObject;
+  try
+    ItemId := StrToInt(JsonObj.GetValue('itemId').Value);
+    Quantity := StrToInt(JsonObj.GetValue('quantity').Value);
+
+    Notification := FStockService.SellItem(ItemId, Quantity);
+    case Notification of
+      snNone:
+        Res.Send<TJSONObject>(
+          TJSONObject.Create
+            .AddPair('success', TJSONBool.Create(True))
+        );
+      snLowQuantity:
+        Res.Send<TJSONObject>(
+          TJSONObject.Create
+            .AddPair('success', TJSONBool.Create(True))
+            .AddPair('notification', 'Quantity less than a quarter')
+        );
+      snCriticalQuantity:
+        Res.Send<TJSONObject>(
+          TJSONObject.Create
+            .AddPair('success', TJSONBool.Create(True))
+            .AddPair('notification', 'Quantity nearing zero')
+        );
+    end;
+  finally
+    JsonObj.Free;
+  end;
+end;
+
+procedure TStockController.GetItems(Req: THorseRequest; Res: THorseResponse);
+var
+  Items: TObjectList<TItem>;
+  JsonArray: TJSONArray;
+  JsonObj: TJSONObject;
+  I: Integer;
+begin
+  Items := FStockService.GetAllItems;
+  try
+    JsonArray := TJSONArray.Create;
+    for I := 0 to Items.Count - 1 do
+    begin
+      JsonObj := TJSONObject.Create;
+      JsonObj.AddPair('id', TJSONNumber.Create(Items[I].Id));
+      JsonObj.AddPair('name', Items[I].Name);
+      JsonObj.AddPair('quantity', TJSONNumber.Create(Items[I].Quantity));
+      JsonObj.AddPair('price', TJSONNumber.Create(Items[I].Price));
+      JsonArray.AddElement(JsonObj);
+    end;
+    Res.Send<TJSONArray>(JsonArray);
+  finally
+    Items.Free;
+  end;
+end;
+
+end.

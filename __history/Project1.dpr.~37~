@@ -1,0 +1,190 @@
+program StockManagementAPI;
+{$APPTYPE CONSOLE}
+
+uses
+  System.SysUtils,
+  System.JSON,
+  Horse,
+  Horse.Jhonson,
+  Horse.JWT,
+  Horse.BasicAuthentication,
+  Horse.CORS,
+  FireDAC.Stan.Param,
+  DatabaseModule in 'DatabaseModule.pas',
+  UserModel in 'Models\UserModel.pas',
+  ProductModel in 'Models\ProductModel.pas',
+  UserService in 'Service\UserService.pas',
+  ProductService in 'Service\ProductService.pas',
+  UserController in 'Controller\UserController.pas',
+  ProductController in 'Controller\ProductController.pas',
+  AuthMiddleware in 'Middleware\AuthMiddleware.pas',
+  JsonResponseHelper in 'Utils\JsonResponseHelper.pas',
+  JWTManager in 'Utils\JWTManager.pas';
+
+var
+  App: THorse;
+  AuthService: TAuthService;
+  ProductService: TProductService;
+  AuthController: TAuthController;
+  ProductController: TProductController;
+  DatabaseModule1: TDatabaseConnection;
+
+begin
+  try
+    // Initialize Database
+    DatabaseModule1 := TDatabaseConnection.Create;
+    try
+      DatabaseModule1.Connect;
+
+      // Create Horse instance
+      App := THorse.Create;
+
+      // Initialize Services
+      AuthService := TAuthService.Create;
+      ProductService := TProductService.Create;
+
+      try
+        // Initialize Controllers
+        AuthController := TAuthController.Create(AuthService);
+        ProductController := TProductController.Create(ProductService);
+
+        try
+          // Initialize Horse Middleware
+          App.Use(Jhonson());
+          App.Use(TAuthMiddleware.Middleware);
+
+          // Configure CORS
+          App.Use(THorseCORSMiddleware.New
+            .AllowOrigin('http://localhost:3000')
+            .AllowCredentials(True)
+            .AllowHeaders('*')
+            .AllowMethods('GET, POST, PUT, DELETE, OPTIONS')
+            .Build);
+
+          // Register Authentication Routes
+          App.Post('/auth/register',
+            THorseCallback(
+              procedure(Req: THorseRequest; Res: THorseResponse)
+              begin
+                AuthController.Register(Req, Res);
+              end
+            )
+          );
+
+          App.Post('/auth/login',
+            THorseCallback(
+              procedure(Req: THorseRequest; Res: THorseResponse)
+              begin
+                AuthController.Login(Req, Res);
+              end
+            )
+          );
+
+          // Protected User Routes
+          App.Get('/users/:id',
+            THorseCallback(
+              procedure(Req: THorseRequest; Res: THorseResponse)
+              begin
+                AuthController.GetUserProfile(Req, Res);
+              end
+            )
+          );
+
+          App.Put('/users/:id',
+            THorseCallback(
+              procedure(Req: THorseRequest; Res: THorseResponse)
+              begin
+                AuthController.UpdateUserProfile(Req, Res);
+              end
+            )
+          );
+
+          // Protected Product Routes
+          App.Post('/products',
+            THorseCallback(
+              procedure(Req: THorseRequest; Res: THorseResponse)
+              begin
+                ProductController.AddItem(Req, Res);
+              end
+            )
+          );
+
+          App.Get('/products',
+            THorseCallback(
+              procedure(Req: THorseRequest; Res: THorseResponse)
+              begin
+                ProductController.GetItems(Req, Res);
+              end
+            )
+          );
+
+          App.Get('/products/:id',
+            THorseCallback(
+              procedure(Req: THorseRequest; Res: THorseResponse)
+              begin
+                ProductController.GetItemById(Req, Res);
+              end
+            )
+          );
+
+          App.Put('/products/:id',
+            THorseCallback(
+              procedure(Req: THorseRequest; Res: THorseResponse)
+              begin
+                ProductController.UpdateItem(Req, Res);
+              end
+            )
+          );
+
+          App.Delete('/products/:id',
+            THorseCallback(
+              procedure(Req: THorseRequest; Res: THorseResponse)
+              begin
+                ProductController.DeleteItem(Req, Res);
+              end
+            )
+          );
+
+          App.Post('/products/:id/sell',
+            THorseCallback(
+              procedure(Req: THorseRequest; Res: THorseResponse)
+              begin
+                ProductController.SellItem(Req, Res);
+              end
+            )
+          );
+
+          // Start Server
+          WriteLn('Starting server on port 8080...');
+          App.Listen(8080);
+          WriteLn('Server is running on port 8080');
+          WriteLn('Press Enter to stop...');
+          ReadLn;
+
+        finally
+          if Assigned(ProductController) then
+            ProductController.Free;
+          if Assigned(AuthController) then
+            AuthController.Free;
+        end;
+
+      finally
+        if Assigned(ProductService) then
+          ProductService.Free;
+        if Assigned(AuthService) then
+          AuthService.Free;
+      end;
+
+    finally
+      if Assigned(DatabaseModule1) then
+        DatabaseModule1.Free;
+    end;
+
+  except
+    on E: Exception do
+    begin
+      Writeln(E.ClassName, ': ', E.Message);
+      Readln;
+    end;
+  end;
+end.

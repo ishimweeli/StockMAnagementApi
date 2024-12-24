@@ -1,0 +1,176 @@
+// UserController.pas
+unit UserController;
+
+interface
+
+uses
+  Horse, System.JSON, System.SysUtils,
+  UserService, UserModel;
+
+type
+  TAuthController = class
+  private
+    FAuthService: TAuthService;
+    function CreateErrorResponse(const AMessage: string): TJSONObject;
+    function CreateSuccessResponse(const AUser: TUser; const AToken: string): TJSONObject;
+  public
+    constructor Create(AAuthService: TAuthService);
+    procedure Register(Req: THorseRequest; Res: THorseResponse);
+    procedure Login(Req: THorseRequest; Res: THorseResponse);
+    destructor Destroy; override;
+  end;
+
+implementation
+
+constructor TAuthController.Create(AAuthService: TAuthService);
+begin
+  inherited Create;
+  FAuthService := AAuthService;
+end;
+
+destructor TAuthController.Destroy;
+begin
+  inherited;
+end;
+
+function TAuthController.CreateErrorResponse(const AMessage: string): TJSONObject;
+begin
+  Result := TJSONObject.Create;
+  Result
+    .AddPair('success', TJSONBool.Create(False))
+    .AddPair('error', TJSONObject.Create
+      .AddPair('message', AMessage));
+end;
+
+function TAuthController.CreateSuccessResponse(const AUser: TUser; const AToken: string): TJSONObject;
+begin
+  Result := TJSONObject.Create;
+  Result
+    .AddPair('success', TJSONBool.Create(True))
+    .AddPair('token', AToken)
+    .AddPair('user', TJSONObject.Create
+      .AddPair('id', TJSONNumber.Create(AUser.Id))
+      .AddPair('username', AUser.Username)
+      .AddPair('email', AUser.Email)
+      .AddPair('role', TJSONNumber.Create(Ord(AUser.Role))));
+end;
+
+procedure TAuthController.Register(Req: THorseRequest; Res: THorseResponse);
+var
+  JsonObj: TJSONObject;
+  AuthResponse: TAuthResponse;
+  Role: TUserRole;
+  ResponseJson: TJSONObject;
+begin
+  JsonObj := nil;
+  ResponseJson := nil;
+
+  try
+    if (Req.Body = EmptyStr) then
+    begin
+      ResponseJson := CreateErrorResponse('Invalid request body');
+      Res.Status(400).ContentType('application/json').Send<TJSONObject>(ResponseJson);
+      Exit;
+    end;
+
+    JsonObj := TJSONObject.ParseJSONValue(Req.Body) as TJSONObject;
+    if not Assigned(JsonObj) then
+    begin
+      ResponseJson := CreateErrorResponse('Invalid JSON format');
+      Res.Status(400).ContentType('application/json').Send<TJSONObject>(ResponseJson);
+      Exit;
+    end;
+
+    try
+      Role := TUserRole(JsonObj.GetValue<Integer>('role', Ord(urStockOfficer)));
+      AuthResponse := FAuthService.Register(
+        JsonObj.GetValue<string>('username'),
+        JsonObj.GetValue<string>('password'),
+        JsonObj.GetValue<string>('email'),
+        Role
+      );
+
+      if AuthResponse.Success then
+      begin
+        ResponseJson := CreateSuccessResponse(AuthResponse.User, AuthResponse.Token);
+        Res.Status(201).ContentType('application/json').Send<TJSONObject>(ResponseJson);
+      end
+      else
+      begin
+        ResponseJson := CreateErrorResponse(AuthResponse.ErrorMessage);
+        Res.Status(400).ContentType('application/json').Send<TJSONObject>(ResponseJson);
+      end;
+
+    finally
+      if Assigned(JsonObj) then
+        JsonObj.Free;
+    end;
+
+  except
+    on E: Exception do
+    begin
+      ResponseJson := CreateErrorResponse('Registration failed: ' + E.Message);
+      Res.Status(500).ContentType('application/json').Send<TJSONObject>(ResponseJson);
+    end;
+  end;
+end;
+
+procedure TAuthController.Login(Req: THorseRequest; Res: THorseResponse);
+var
+  JsonObj: TJSONObject;
+  AuthResponse: TAuthResponse;
+  ResponseJson: TJSONObject;
+begin
+  JsonObj := nil;
+  ResponseJson := nil;
+
+  try
+    if (Req.Body = EmptyStr) then
+    begin
+      ResponseJson := CreateErrorResponse('Invalid request body');
+      Res.Status(400).ContentType('application/json').Send<TJSONObject>(ResponseJson);
+      Exit;
+    end;
+
+    JsonObj := TJSONObject.ParseJSONValue(Req.Body) as TJSONObject;
+    if not Assigned(JsonObj) then
+    begin
+      ResponseJson := CreateErrorResponse('Invalid JSON format');
+      Res.Status(400).ContentType('application/json').Send<TJSONObject>(ResponseJson);
+      Exit;
+    end;
+
+    try
+      AuthResponse := FAuthService.Login(
+        JsonObj.GetValue<string>('username'),
+        JsonObj.GetValue<string>('password')
+      );
+
+      if AuthResponse.Success then
+      begin
+//        ResponseJson := CreateSuccessResponse(AuthResponse.User, AuthResponse.Token);
+//          WriteLn(ResponseJson.ToString);
+//        Res.Status(200).ContentType('application/json').Send<TJSONObject>(ResponseJson);
+      end
+      else
+      begin
+        ResponseJson := CreateErrorResponse(AuthResponse.ErrorMessage);
+        Res.Status(401).ContentType('application/json').Send<TJSONObject>(ResponseJson);
+      end;
+
+    finally
+      if Assigned(JsonObj) then
+        JsonObj.Free;
+    end;
+
+  except
+    on E: Exception do
+    begin
+      ResponseJson := CreateErrorResponse('Login failed: ' + E.Message);
+      Res.Status(500).ContentType('application/json').Send<TJSONObject>(ResponseJson);
+    end;
+  end;
+end;
+
+end.
+

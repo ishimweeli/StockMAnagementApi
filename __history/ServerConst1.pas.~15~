@@ -1,0 +1,76 @@
+unit ServerConst1;
+
+interface
+
+uses
+  Horse,
+  System.SysUtils,
+  DatabaseModule,
+  UserController,
+  UserService;
+
+procedure StartServer;
+
+implementation
+
+var
+  AuthController: TAuthController;
+  AuthService: TAuthService;
+
+procedure StartServer;
+begin
+  try
+    // Initialize database connection
+    if not Assigned(DatabaseModule1) then
+      DatabaseModule1 := TDatabaseConnection.Create;
+    DatabaseModule1.Connect;
+
+    // Initialize services
+    AuthService := TAuthService.Create;
+
+    // Initialize controllers with their dependencies
+    AuthController := TAuthController.Create(AuthService);
+
+    // Register authentication routes
+    THorse
+      .Post('/auth/login',
+        procedure(Req: THorseRequest; Res: THorseResponse)
+        begin
+          AuthController.Login(Req, Res);
+        end
+      );
+
+    THorse
+      .Post('/auth/register',
+        procedure(Req: THorseRequest; Res: THorseResponse)
+        begin
+          AuthController.Register(Req, Res);
+        end
+      );
+
+    // Start server
+    Writeln('Server is starting on port 8080...');
+    THorse.Listen(8080);
+  except
+    on E: Exception do
+    begin
+      if Assigned(AuthController) then
+        AuthController.Free;
+      if Assigned(AuthService) then
+        AuthService.Free;
+      raise Exception.Create('Server initialization failed: ' + E.Message);
+    end;
+  end;
+end;
+
+initialization
+  AuthController := nil;
+  AuthService := nil;
+
+finalization
+  if Assigned(AuthController) then
+    AuthController.Free;
+  if Assigned(AuthService) then
+    AuthService.Free;
+
+end.

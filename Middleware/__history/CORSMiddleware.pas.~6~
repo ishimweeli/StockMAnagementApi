@@ -1,0 +1,36 @@
+unit CORSMiddleware;
+
+interface
+
+uses
+  Horse, System.SysUtils;
+
+procedure ConfigureCORS(App: THorse);
+
+implementation
+
+procedure ConfigureCORS(App: THorse);
+begin
+  App.Use(
+    procedure(Req: THorseRequest; Res: THorseResponse; Next: TProc)
+    begin
+      // Set CORS headers
+      Res.RawWebResponse.SetCustomHeader('Access-Control-Allow-Origin', 'http://localhost:3000');
+      Res.RawWebResponse.SetCustomHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
+      Res.RawWebResponse.SetCustomHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-Requested-With');
+      Res.RawWebResponse.SetCustomHeader('Access-Control-Allow-Credentials', 'true');
+      Res.RawWebResponse.SetCustomHeader('Access-Control-Max-Age', '86400'); // 24 hours
+
+      // Handle OPTIONS request
+      if SameText(Req.RawWebRequest.Method, 'OPTIONS') then
+      begin
+        Res.Status(204); // No Content
+        Res.Send('');
+      end
+      else
+        Next();
+    end
+  );
+end;
+
+end.

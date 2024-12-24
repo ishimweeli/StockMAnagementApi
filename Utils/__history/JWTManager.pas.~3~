@@ -1,0 +1,137 @@
+unit JWTManager;
+
+interface
+
+uses
+  System.JSON,
+  System.SysUtils,
+  System.NetEncoding,
+  System.Classes,
+  System.Hash,
+  System.DateUtils,  // Added for DateTimeToUnix/UnixToDateTime
+  UserModel;
+
+type
+  TJWTClaims = class
+  public
+    UserId: Integer;
+    Username: string;
+    Role: TUserRole;
+    ExpiresAt: TDateTime;
+  end;
+
+  TJWTManager = class
+  private
+    const
+      SECRET_KEY = 'your-secret-key-here'; // Replace with your actual secret key
+      TOKEN_EXPIRATION_HOURS = 24;
+    class function Base64UrlEncode(const Input: string): string;
+    class function Base64UrlDecode(const Input: string): string;
+    class function GenerateSignature(const Header, Payload: string): string;
+  public
+    class function GenerateToken(const UserId: Integer; const Username: string;
+      const Role: TUserRole): string;
+    class function ValidateToken(const Token: string; out Claims: TJWTClaims): Boolean;
+  end;
+
+implementation
+
+class function TJWTManager.Base64UrlEncode(const Input: string): string;
+begin
+  Result := TNetEncoding.Base64.Encode(Input);
+  Result := Result.Replace('=', '').Replace('+', '-').Replace('/', '_');
+end;
+
+class function TJWTManager.Base64UrlDecode(const Input: string): string;
+var
+  PaddedInput: string;
+begin
+  PaddedInput := Input.Replace('-', '+').Replace('_', '/');
+  case Length(PaddedInput) mod 4 of
+    2: PaddedInput := PaddedInput + '==';
+    3: PaddedInput := PaddedInput + '=';
+  end;
+  Result := TNetEncoding.Base64.Decode(PaddedInput);
+end;
+
+class function TJWTManager.GenerateSignature(const Header, Payload: string): string;
+begin
+  Result := THashSHA2.GetHMAC(
+    Header + '.' + Payload,
+    SECRET_KEY,
+    SHA256);
+end;
+
+class function TJWTManager.GenerateToken(const UserId: Integer; const Username: string;
+  const Role: TUserRole): string;
+var
+  Header, Payload: TJSONObject;
+  HeaderStr, PayloadStr, Signature: string;
+begin
+  Header := TJSONObject.Create;
+  try
+    Header.AddPair('alg', 'HS256');
+    Header.AddPair('typ', 'JWT');
+    HeaderStr := Base64UrlEncode(Header.ToString);
+  finally
+    Header.Free;
+  end;
+
+  Payload := TJSONObject.Create;
+  try
+    Payload.AddPair('sub', TJSONNumber.Create(UserId));
+    Payload.AddPair('username', Username);
+    Payload.AddPair('role', TJSONNumber.Create(Integer(Role)));
+    Payload.AddPair('exp', TJSONNumber.Create(DateTimeToUnix(Now + TOKEN_EXPIRATION_HOURS/24)));
+    PayloadStr := Base64UrlEncode(Payload.ToString);
+  finally
+    Payload.Free;
+  end;
+
+  Signature := Base64UrlEncode(GenerateSignature(HeaderStr, PayloadStr));
+  Result := HeaderStr + '.' + PayloadStr + '.' + Signature;
+end;
+
+class function TJWTManager.ValidateToken(const Token: string; out Claims: TJWTClaims): Boolean;
+var
+  Parts: TArray<string>;
+  PayloadJson: TJSONObject;
+  PayloadStr: string;
+begin
+  Result := False;
+  Claims := nil;
+  try
+    // Split token into parts
+    Parts := Token.Split(['.']);
+    if Length(Parts) <> 3 then
+      Exit;
+
+    // Verify signature
+    if GenerateSignature(Parts[0], Parts[1]) <>
+       Base64UrlDecode(Parts[2].Replace('-', '+').Replace('_', '/')) then
+      Exit;
+
+    // Decode payload
+    PayloadStr := Base64UrlDecode(Parts[1]);
+    PayloadJson := TJSONObject.ParseJSONValue(PayloadStr) as TJSONObject;
+    try
+      // Check expiration
+      if DateTimeToUnix(Now) > PayloadJson.GetValue<Int64>('exp') then
+        Exit;
+
+      // Extract claims
+      Claims := TJWTClaims.Create;
+      Claims.UserId := PayloadJson.GetValue<Integer>('sub');
+      Claims.Username := PayloadJson.GetValue<string>('username');
+      Claims.Role := TUserRole(PayloadJson.GetValue<Integer>('role'));
+      Claims.ExpiresAt := UnixToDateTime(PayloadJson.GetValue<Int64>('exp'));
+      Result := True;
+    finally
+      PayloadJson.Free;
+    end;
+  except
+    FreeAndNil(Claims);
+  end;
+end;
+
+end.

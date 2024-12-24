@@ -1,0 +1,16 @@
+unit UserModel;
+
+interface
+
+type
+  TUser = class
+  public
+    ID: Integer;
+    Username: string;
+    Password: string;
+    Role: string; // 'admin' or 'stock_officer'
+  end;
+
+implementation
+
+end.

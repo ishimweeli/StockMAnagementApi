@@ -1,0 +1,91 @@
+unit JWTManager;
+
+interface
+
+uses
+  System.SysUtils, System.JSON, System.DateUtils,
+  JOSE.Core.JWT, JOSE.Core.Builder,
+  UserModel;
+
+type
+  TJWTClaims = record
+    UserId: Integer;
+    Username: string;
+    Role: TUserRole;
+    constructor Create(AUserId: Integer; const AUsername: string; ARole: TUserRole);
+  end;
+
+  TJWTManager = class
+  private
+    const
+      SECRET_KEY = 'your-secret-key-here'; // In production, this should be stored securely
+      TOKEN_EXPIRY_HOURS = 24;
+  public
+    class function GenerateToken(const Claims: TJWTClaims): string;
+    class function ValidateToken(const Token: string; out Claims: TJWTClaims): Boolean;
+  end;
+
+implementation
+
+{ TJWTClaims }
+
+constructor TJWTClaims.Create(AUserId: Integer; const AUsername: string; ARole: TUserRole);
+begin
+  UserId := AUserId;
+  Username := AUsername;
+  Role := ARole;
+end;
+
+{ TJWTManager }
+
+class function TJWTManager.GenerateToken(const Claims: TJWTClaims): string;
+var
+  JWT: TJWT;
+begin
+  JWT := TJWT.Create;
+  try
+    // Set standard claims
+    JWT.Claims.IssuedAt := Now;
+    JWT.Claims.Expiration := IncHour(Now, TOKEN_EXPIRY_HOURS);
+
+    // Set custom claims
+    JWT.Claims.SetClaimOfType<Integer>('uid', Claims.UserId);
+    JWT.Claims.SetClaimOfType<string>('username', Claims.Username);
+    JWT.Claims.SetClaimOfType<Integer>('role', Ord(Claims.Role));
+
+    Result := TJOSE.SHA256CompactToken(SECRET_KEY, JWT);
+  finally
+    JWT.Free;
+  end;
+end;
+
+class function TJWTManager.ValidateToken(const Token: string; out Claims: TJWTClaims): Boolean;
+var
+  JWT: TJWT;
+begin
+  Result := False;
+  if Token = '' then
+    Exit;
+
+  try
+    JWT := TJOSE.Verify(SECRET_KEY, Token);
+    try
+      if not (JWT.Verified and (JWT.Claims.Expiration > Now)) then
+        Exit;
+
+      Claims := TJWTClaims.Create(
+        JWT.Claims.GetClaimOfType<Integer>('uid'),
+        JWT.Claims.GetClaimOfType<string>('username'),
+        TUserRole(JWT.Claims.GetClaimOfType<Integer>('role'))
+      );
+
+      Result := True;
+    finally
+      JWT.Free;
+    end;
+  except
+    Result := False;
+  end;
+end;
+
+end.

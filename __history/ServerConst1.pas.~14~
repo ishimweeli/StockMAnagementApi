@@ -1,0 +1,112 @@
+unit ServerConst1;
+
+interface
+
+uses
+  Horse,
+  System.SysUtils,
+  DatabaseModule,
+  UserController,
+  UserService,
+  ProductController,
+  ProductService;
+
+procedure StartServer;
+
+implementation
+
+var
+  AuthController: TAuthController;
+  StockController: TStockController;
+  AuthService: TAuthService;
+  StockService: TStockService;
+
+procedure StartServer;
+begin
+  try
+    // Initialize database connection
+    if not Assigned(DatabaseModule1) then
+      DatabaseModule1 := TDatabaseConnection.Create;
+    DatabaseModule1.Connect;
+
+    // Initialize services
+    AuthService := TAuthService.Create;
+    StockService := TStockService.Create;
+
+    // Initialize controllers with their dependencies
+    AuthController := TAuthController.Create(AuthService);
+    StockController := TStockController.Create(StockService);
+
+    // Register routes with proper method bindings
+    THorse
+      .Post('/auth/login',
+        procedure(Req: THorseRequest; Res: THorseResponse)
+        begin
+          AuthController.Login(Req, Res);
+        end
+      );
+
+    THorse
+      .Post('/stock/add',
+        procedure(Req: THorseRequest; Res: THorseResponse)
+        begin
+          StockController.AddItem(Req, Res);
+        end
+      );
+
+    THorse
+      .Post('/stock/sell',
+        procedure(Req: THorseRequest; Res: THorseResponse)
+        begin
+          StockController.SellItem(Req, Res);
+        end
+      );
+
+    THorse
+      .Get('/stock',
+        procedure(Req: THorseRequest; Res: THorseResponse)
+        begin
+          StockController.GetItems(Req, Res);
+        end
+      );
+
+    // Start server
+    Writeln('Server is starting on port 8080...');
+    THorse.Listen(8080);
+
+  except
+    on E: Exception do
+    begin
+      // Clean up resources in case of failure
+      if Assigned(AuthController) then
+        AuthController.Free;
+      if Assigned(StockController) then
+        StockController.Free;
+      if Assigned(AuthService) then
+        AuthService.Free;
+      if Assigned(StockService) then
+        StockService.Free;
+
+      raise Exception.Create('Server initialization failed: ' + E.Message);
+    end;
+  end;
+end;
+
+initialization
+  AuthController := nil;
+  StockController := nil;
+  AuthService := nil;
+  StockService := nil;
+
+finalization
+  // Clean up resources when unit is finalized
+  if Assigned(AuthController) then
+    AuthController.Free;
+  if Assigned(StockController) then
+    StockController.Free;
+  if Assigned(AuthService) then
+    AuthService.Free;
+  if Assigned(StockService) then
+    StockService.Free;
+
+end.

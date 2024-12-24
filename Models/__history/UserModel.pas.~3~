@@ -1,0 +1,24 @@
+unit UserModel;
+
+interface
+
+type
+  TUserRole = (urAdmin, urStockOfficer);
+
+  TUser = class
+  private
+    FId: Integer;
+    FUsername: string;
+    FPassword: string;
+    FRole: TUserRole;
+  public
+    property Id: Integer read FId write FId;
+    property Username: string read FUsername write FUsername;
+    property Password: string read FPassword write FPassword;
+    property Role: TUserRole read FRole write FRole;
+  end;
+
+implementation
+
+end.
+

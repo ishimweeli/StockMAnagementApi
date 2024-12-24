@@ -1,0 +1,15 @@
+unit ProductModel;
+
+interface
+
+type
+  TProduct = class
+  public
+    ID: Integer;
+    Name: string;
+    Quantity: Integer;
+  end;
+
+implementation
+
+end.

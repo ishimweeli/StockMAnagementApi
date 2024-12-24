@@ -1,0 +1,24 @@
+// First, create a new unit called 'CORSMiddleware.pas'
+unit CORSMiddleware;
+
+interface
+
+uses
+  Horse,
+  Horse.CORS;
+
+procedure ConfigureCORS(App: THorse);
+
+implementation
+
+procedure ConfigureCORS(App: THorse);
+begin
+  App.UseCORS(
+    'http://localhost:3000',  // AllowedOrigin
+    'GET, POST, PUT, DELETE, OPTIONS, HEAD', // AllowedMethods
+    'Content-Type, Authorization, X-Requested-With', // AllowedHeaders
+    True // AllowCredentials
+  );
+end;
+
+end.

@@ -1,0 +1,64 @@
+program StockManagementAPI;
+{$APPTYPE CONSOLE}
+
+uses
+  System.SysUtils,
+  System.JSON,
+  Horse,
+  Horse.Jhonson,
+  Horse.JWT,
+  Horse.BasicAuthentication,
+  FireDAC.Stan.Param,
+  DatabaseModule in 'DatabaseModule.pas',
+  UserModel in 'Models\UserModel.pas',
+  ProductModel in 'Models\ProductModel.pas',
+  UserService in 'Service\UserService.pas',
+  ProductService in 'Service\ProductService.pas',
+  UserController in 'Controller\UserController.pas',
+  ProductController in 'Controller\ProductController.pas',
+  AuthMiddleware in 'Middleware\AuthMiddleware.pas',
+  JsonResponseHelper in 'Utils\JsonResponseHelper.pas',
+  JWTManager in 'Utils\JWTManager.pas';
+
+var
+  App: THorse;
+
+begin
+  try
+    App := THorse.Create;
+
+    // Initialize Horse Middleware
+    App.Use(Jhonson());
+    App.Use(TAuthMiddleware.Middleware);
+
+    // Register Authentication Routes
+    App.Post('/auth/register', TAuthController.Register);
+    App.Post('/auth/login', TAuthController.Login);
+
+    // Protected User Routes
+    App.Get('/users/:id', TAuthController.GetUserProfile);
+    App.Put('/users/:id', TAuthController.UpdateUserProfile);
+
+    // Protected Product Routes
+    App.Post('/products', TProductController.AddItem);
+    App.Get('/products', TProductController.GetItems);
+    App.Get('/products/:id', TProductController.GetItemById);
+    App.Put('/products/:id', TProductController.UpdateItem);
+    App.Delete('/products/:id', TProductController.DeleteItem);
+    App.Post('/products/:id/sell', TProductController.SellItem);
+
+    // Start Server
+    WriteLn('Starting server on port 8080...');
+    App.Listen(8080);
+    WriteLn('Server is running on port 8080');
+    WriteLn('Press Enter to stop...');
+    ReadLn;
+
+  except
+    on E: Exception do
+    begin
+      Writeln(E.ClassName, ': ', E.Message);
+      Readln;
+    end;
+  end;
+end.

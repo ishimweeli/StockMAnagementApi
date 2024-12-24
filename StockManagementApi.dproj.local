@@ -1,0 +1,56 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<BorlandProject>
+	<Transactions>
+    <Transaction>2024/12/20 18:17:57.000.400,=C:\Users\EliabIshimwe\Documents\Embarcadero\Studio\Projects\ServerConst1.pas</Transaction>
+    <Transaction>2024/12/20 18:17:57.000.194,=C:\Users\EliabIshimwe\Documents\Embarcadero\Studio\Projects\WebModuleUnit1.pas</Transaction>
+    <Transaction>2024/12/21 06:21:13.000.962,=C:\Users\EliabIshimwe\Documents\Embarcadero\Studio\Projects\WebModuleUnit1.pas</Transaction>
+    <Transaction>2024/12/21 06:21:14.000.809,=C:\Users\EliabIshimwe\Documents\Embarcadero\Studio\Projects\ServerConst1.pas</Transaction>
+    <Transaction>2024/12/21 06:27:02.000.994,C:\Users\EliabIshimwe\Documents\Embarcadero\Studio\Projects\ServerConst1.pas=C:\Users\EliabIshimwe\Documents\GitHub\denis-2\DelphiBackend\ServerConst1.pas</Transaction>
+    <Transaction>2024/12/21 06:27:08.000.731,C:\Users\EliabIshimwe\Documents\Embarcadero\Studio\Projects\WebModuleUnit1.pas=C:\Users\EliabIshimwe\Documents\GitHub\denis-2\DelphiBackend\WebModuleUnit1.pas</Transaction>
+    <Transaction>2024/12/21 06:27:08.000.731,C:\Users\EliabIshimwe\Documents\Embarcadero\Studio\Projects\WebModuleUnit1.dfm=C:\Users\EliabIshimwe\Documents\GitHub\denis-2\DelphiBackend\WebModuleUnit1.dfm</Transaction>
+    <Transaction>2024/12/21 06:27:25.000.397,C:\Users\EliabIshimwe\Documents\Embarcadero\Studio\Projects\Project1.dproj=C:\Users\EliabIshimwe\Documents\GitHub\denis-2\DelphiBackend\Project1.dproj</Transaction>
+    <Transaction>2024/12/21 06:54:26.000.948,=C:\Users\EliabIshimwe\Documents\GitHub\denis-2\DelphiBackend\Service\UserService.pas</Transaction>
+    <Transaction>2024/12/21 06:54:26.000.907,=C:\Users\EliabIshimwe\Documents\GitHub\denis-2\DelphiBackend\Service\ProductService.pas</Transaction>
+    <Transaction>2024/12/21 06:54:42.000.809,=C:\Users\EliabIshimwe\Documents\GitHub\denis-2\DelphiBackend\Controller\ProductController.pas</Transaction>
+    <Transaction>2024/12/21 06:54:42.000.831,=C:\Users\EliabIshimwe\Documents\GitHub\denis-2\DelphiBackend\Controller\UserController.pas</Transaction>
+    <Transaction>2024/12/21 06:55:24.000.628,=C:\Users\EliabIshimwe\Documents\GitHub\denis-2\DelphiBackend\Models\UserModel.pas</Transaction>
+    <Transaction>2024/12/21 06:55:24.000.600,=C:\Users\EliabIshimwe\Documents\GitHub\denis-2\DelphiBackend\Models\ProductModel.pas</Transaction>
+    <Transaction>2024/12/21 07:25:42.000.984,=C:\Users\EliabIshimwe\Documents\GitHub\denis-2\DelphiBackend\DatabaseModule.pas</Transaction>
+    <Transaction>2024/12/21 07:27:44.000.577,=C:\Users\EliabIshimwe\Documents\GitHub\denis-2\DelphiBackend\Middleware\AuthMiddleware.pas</Transaction>
+    <Transaction>2024/12/21 08:59:11.000.956,=C:\Users\EliabIshimwe\Documents\GitHub\denis-2\DelphiBackend\Controller\ProductController.pas</Transaction>
+    <Transaction>2024/12/21 08:59:12.000.029,=C:\Users\EliabIshimwe\Documents\GitHub\denis-2\DelphiBackend\Controller\UserController.pas</Transaction>
+    <Transaction>2024/12/21 09:00:11.000.715,=C:\Users\EliabIshimwe\Documents\GitHub\denis-2\DelphiBackend\WebModuleUnit1.pas</Transaction>
+    <Transaction>2024/12/21 09:00:11.000.414,=C:\Users\EliabIshimwe\Documents\GitHub\denis-2\DelphiBackend\ServerConst1.pas</Transaction>
+    <Transaction>2024/12/21 12:13:58.000.448,=C:\Users\EliabIshimwe\Documents\GitHub\denis-2\DelphiBackend\Models\UserModel.pas</Transaction>
+    <Transaction>2024/12/21 12:13:58.000.401,=C:\Users\EliabIshimwe\Documents\GitHub\denis-2\DelphiBackend\Models\ProductModel.pas</Transaction>
+    <Transaction>2024/12/21 12:38:29.000.730,=C:\Users\EliabIshimwe\Documents\GitHub\denis-2\DelphiBackend\Service\UserService.pas</Transaction>
+    <Transaction>2024/12/21 12:38:29.000.673,=C:\Users\EliabIshimwe\Documents\GitHub\denis-2\DelphiBackend\Service\ProductService.pas</Transaction>
+    <Transaction>2024/12/21 14:20:25.000.055,=C:\Users\EliabIshimwe\Documents\GitHub\denis-2\DelphiBackend\ServerConst1.pas</Transaction>
+    <Transaction>2024/12/22 00:39:22.000.889,=C:\Users\EliabIshimwe\Documents\GitHub\denis-2\DelphiBackend\Middleware\AuthMiddleware.pas</Transaction>
+    <Transaction>2024/12/22 01:15:33.000.851,=C:\Users\EliabIshimwe\Documents\GitHub\denis-2\DelphiBackend\WebModuleUnit1.pas</Transaction>
+    <Transaction>2024/12/22 08:44:25.000.674,=C:\Users\EliabIshimwe\Documents\GitHub\denis-2\DelphiBackend\Utils\JsonResponseHelper.pas</Transaction>
+    <Transaction>2024/12/22 16:33:56.000.639,=C:\Users\EliabIshimwe\Documents\GitHub\denis-2\DelphiBackend\Utils\JWTManager.pas</Transaction>
+    <Transaction>2024/12/23 21:27:27.779,=C:\Users\EliabIshimwe\Documents\GitHub\denis-2\DelphiBackend\Middleware\CORSMiddleware.pas</Transaction>
+    <Transaction>2024/12/24 12:44:18.843,=C:\Users\EliabIshimwe\Documents\GitHub\denis-2\DelphiBackend\Models\NotificationModel.pas</Transaction>
+    <Transaction>2024/12/24 14:10:33.794,C:\Users\EliabIshimwe\Documents\GitHub\denis-2\DelphiBackend\StockManagementApi.dproj=C:\Users\EliabIshimwe\Documents\GitHub\denis-2\DelphiBackend\Project1.dproj</Transaction>
+  </Transactions>
+	<ProjectSortOrder AutoSort="0" SortType="0">
+    <File Path="Controller"/>
+    <File Path="Controller\ProductController.pas"/>
+    <File Path="Controller\UserController.pas"/>
+    <File Path="Middleware"/>
+    <File Path="Middleware\AuthMiddleware.pas"/>
+    <File Path="Middleware\CORSMiddleware.pas"/>
+    <File Path="Models"/>
+    <File Path="Models\NotificationModel.pas"/>
+    <File Path="Models\ProductModel.pas"/>
+    <File Path="Models\UserModel.pas"/>
+    <File Path="Service"/>
+    <File Path="Service\ProductService.pas"/>
+    <File Path="Service\UserService.pas"/>
+    <File Path="Utils"/>
+    <File Path="Utils\JsonResponseHelper.pas"/>
+    <File Path="Utils\JWTManager.pas"/>
+    <File Path="DatabaseModule.pas"/>
+  </ProjectSortOrder>
+</BorlandProject>

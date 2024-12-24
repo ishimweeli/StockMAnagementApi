@@ -1,0 +1,51 @@
+unit JsonResponseHelper;
+
+interface
+
+uses
+  System.JSON, UserModel;
+
+type
+  TJsonResponseHelper = class
+  public
+    class function CreateError(const AMessage: string; AStatusCode: Integer = 400): TJSONObject;
+    class function CreateSuccess(const AData: TJSONValue = nil): TJSONObject;
+    class function CreateAuthSuccess(const AUser: TUser; const AToken: string): TJSONObject;
+  end;
+
+implementation
+
+class function TJsonResponseHelper.CreateError(const AMessage: string; AStatusCode: Integer = 400): TJSONObject;
+begin
+  Result := TJSONObject.Create;
+  Result.AddPair('success', TJSONBool.Create(False))
+        .AddPair('error', TJSONObject.Create
+          .AddPair('message', AMessage)
+          .AddPair('code', TJSONNumber.Create(AStatusCode)));
+end;
+
+class function TJsonResponseHelper.CreateSuccess(const AData: TJSONValue = nil): TJSONObject;
+begin
+  Result := TJSONObject.Create;
+  Result.AddPair('success', TJSONBool.Create(True));
+  if Assigned(AData) then
+    Result.AddPair('data', AData);
+end;
+
+class function TJsonResponseHelper.CreateAuthSuccess(const AUser: TUser; const AToken: string): TJSONObject;
+var
+  UserJson: TJSONObject;
+begin
+  UserJson := TJSONObject.Create;
+  UserJson.AddPair('id', TJSONNumber.Create(AUser.Id))
+         .AddPair('username', AUser.Username)
+         .AddPair('email', AUser.Email)
+         .AddPair('role', TJSONNumber.Create(Ord(AUser.Role)));
+
+  Result := TJSONObject.Create;
+  Result.AddPair('success', TJSONBool.Create(True))
+        .AddPair('token', AToken)
+        .AddPair('user', UserJson);
+end;
+
+end.

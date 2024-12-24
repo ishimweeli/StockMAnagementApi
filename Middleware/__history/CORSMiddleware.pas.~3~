@@ -1,0 +1,23 @@
+unit CORSMiddleware;
+
+interface
+
+uses
+  Horse,
+  Horse.CORS;
+
+procedure ConfigureCORS(App: THorse);
+
+implementation
+
+procedure ConfigureCORS(App: THorse);
+begin
+  App.Use(CORS);  // This is the correct syntax
+  CORS
+    .AllowOrigin('http://localhost:3000')
+    .AllowMethods('GET, POST, PUT, DELETE, OPTIONS')
+    .AllowHeaders('*')
+    .AllowCredentials('true');
+end;
+
+end.

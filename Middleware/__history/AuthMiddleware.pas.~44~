@@ -1,0 +1,275 @@
+unit AuthMiddleware;
+
+interface
+
+uses
+  Horse,
+  Horse.Core.RouterTree,
+  Horse.Core.Route,
+  Horse.Request,
+  Horse.Response,
+  Horse.Commons,
+  Web.HTTPApp,
+  System.SysUtils,
+  System.JSON,
+  System.Classes,
+  System.Generics.Collections,
+  Data.DB,
+  JWTManager,
+  UserModel;
+
+type
+  TRouteAccess = record
+    Path: string;
+    Method: string;
+    RequiredRoles: TArray<TUserRole>;
+    constructor Create(const APath, AMethod: string; const ARoles: TArray<TUserRole>);
+  end;
+
+  TAuthMiddleware = class
+  private
+    class var FProtectedRoutes: TArray<TRouteAccess>;
+    class procedure InitializeProtectedRoutes;
+    class function ExtractBearerToken(const AuthHeader: string): string;
+    class function ValidateAndExtractClaims(const AToken: string; out Claims: TJWTClaims): Boolean;
+    class function HasRequiredRole(const UserRole: TUserRole; const RequiredRoles: TArray<TUserRole>): Boolean;
+    class procedure StoreClaimsInRequest(Req: THorseRequest; const Claims: TJWTClaims);
+    class function IsPublicPath(const Path: string): Boolean;
+    class function MatchRoute(const Path, Method: string; out RequiredRoles: TArray<TUserRole>): Boolean;
+    class function NormalizePath(const Path: string): string;
+    class function MethodToString(Method: TMethodType): string;
+  public
+    class constructor Create;
+    class function Middleware: THorseCallback;
+  end;
+
+implementation
+
+{ TRouteAccess }
+
+constructor TRouteAccess.Create(const APath, AMethod: string; const ARoles: TArray<TUserRole>);
+begin
+  Path := APath;
+  Method := AMethod;
+  RequiredRoles := ARoles;
+end;
+
+{ TAuthMiddleware }
+
+class constructor TAuthMiddleware.Create;
+begin
+  InitializeProtectedRoutes;
+end;
+
+class procedure TAuthMiddleware.InitializeProtectedRoutes;
+begin
+  SetLength(FProtectedRoutes, 6);
+
+  // Product routes - require either Admin or StockOfficer role
+  FProtectedRoutes[0] := TRouteAccess.Create('products', 'GET', [urAdmin, urStockOfficer]);
+  FProtectedRoutes[1] := TRouteAccess.Create('products/:id', 'GET', [urAdmin, urStockOfficer]);
+  FProtectedRoutes[2] := TRouteAccess.Create('products', 'POST', [urAdmin]);
+  FProtectedRoutes[3] := TRouteAccess.Create('products/:id', 'PUT', [urAdmin]);
+  FProtectedRoutes[4] := TRouteAccess.Create('products/:id', 'DELETE', [urAdmin]);
+  FProtectedRoutes[5] := TRouteAccess.Create('products/:id/sell', 'POST', [urAdmin, urStockOfficer]);
+end;
+
+class function TAuthMiddleware.NormalizePath(const Path: string): string;
+var
+  Parts: TArray<string>;
+  I: Integer;
+  TempInt: Integer;
+begin
+  // Remove leading slash and convert to lowercase
+  Result := Path.ToLower;
+  if Result.StartsWith('/') then
+    Result := Result.Substring(1);
+
+  // Replace numeric values with :id placeholder
+  Parts := Result.Split(['/']);
+  for I := 0 to High(Parts) do
+    if TryStrToInt(Parts[I], TempInt) then
+      Parts[I] := ':id';
+
+  Result := string.Join('/', Parts);
+end;
+
+class function TAuthMiddleware.MethodToString(Method: TMethodType): string;
+begin
+  case Method of
+    mtGet: Result := 'GET';
+    mtPost: Result := 'POST';
+    mtPut: Result := 'PUT';
+    mtDelete: Result := 'DELETE';
+    mtPatch: Result := 'PATCH';
+    mtHead: Result := 'HEAD';
+    mtOptions: Result := 'OPTIONS';
+    mtTrace: Result := 'TRACE';
+    mtConnect: Result := 'CONNECT';
+  else
+    Result := '';
+  end;
+end;
+
+class function TAuthMiddleware.MatchRoute(const Path, Method: string; out RequiredRoles: TArray<TUserRole>): Boolean;
+var
+  NormalizedPath: string;
+  Route: TRouteAccess;
+begin
+  Result := False;
+  SetLength(RequiredRoles, 0);
+  NormalizedPath := NormalizePath(Path);
+
+  for Route in FProtectedRoutes do
+    if (Route.Path = NormalizedPath) and (Route.Method = Method) then
+    begin
+      RequiredRoles := Route.RequiredRoles;
+      Result := True;
+      Break;
+    end;
+end;
+
+class function TAuthMiddleware.ExtractBearerToken(const AuthHeader: string): string;
+begin
+  Result := '';
+  if AuthHeader.StartsWith('Bearer ', True) then
+    Result := AuthHeader.Substring(7);
+end;
+
+class function TAuthMiddleware.ValidateAndExtractClaims(const AToken: string; out Claims: TJWTClaims): Boolean;
+begin
+  Result := False;
+  try
+    Result := TJWTManager.ValidateToken(AToken, Claims);
+  except
+    on E: Exception do
+      Result := False;
+  end;
+end;
+
+class function TAuthMiddleware.HasRequiredRole(const UserRole: TUserRole; const RequiredRoles: TArray<TUserRole>): Boolean;
+var
+  Role: TUserRole;
+begin
+  Result := False;
+  for Role in RequiredRoles do
+    if UserRole = Role then
+      Exit(True);
+end;
+
+class procedure TAuthMiddleware.StoreClaimsInRequest(Req: THorseRequest; const Claims: TJWTClaims);
+begin
+  Req.Query.Dictionary.AddOrSetValue('user-id', Claims.UserId.ToString);
+  Req.Query.Dictionary.AddOrSetValue('user-role', IntToStr(Integer(Claims.Role)));
+  Req.Query.Dictionary.AddOrSetValue('username', Claims.Username);
+end;
+
+class function TAuthMiddleware.IsPublicPath(const Path: string): Boolean;
+begin
+  Result := (Path = '/auth/login') or (Path = '/auth/register');
+end;
+
+class function TAuthMiddleware.Middleware: THorseCallback;
+begin
+  Result := procedure(Req: THorseRequest; Res: THorseResponse; Next: TProc)
+    var
+      AuthHeader: string;
+      Token: string;
+      Path: string;
+      Claims: TJWTClaims;
+      ErrorObj: TJSONObject;
+      RequiredRoles: TArray<TUserRole>;
+    begin
+      try
+        // Get the current path
+        Path := Req.RawWebRequest.PathInfo;
+
+        // Skip authentication for public endpoints
+        if IsPublicPath(Path) then
+        begin
+          Next;
+          Exit;
+        end;
+
+        // Get Authorization header
+        AuthHeader := Req.Headers['Authorization'];
+        if AuthHeader.IsEmpty then
+        begin
+          ErrorObj := TJSONObject.Create;
+          try
+            ErrorObj.AddPair('error', 'Authorization header is required');
+            Res.Status(401).Send<TJSONObject>(ErrorObj);
+          except
+            ErrorObj.Free;
+            raise;
+          end;
+          Exit;
+        end;
+
+        // Extract token
+        Token := ExtractBearerToken(AuthHeader);
+        if Token.IsEmpty then
+        begin
+          ErrorObj := TJSONObject.Create;
+          try
+            ErrorObj.AddPair('error', 'Invalid authorization format');
+            Res.Status(401).Send<TJSONObject>(ErrorObj);
+          except
+            ErrorObj.Free;
+            raise;
+          end;
+          Exit;
+        end;
+
+        // Validate token and extract claims
+        if not ValidateAndExtractClaims(Token, Claims) then
+        begin
+          ErrorObj := TJSONObject.Create;
+          try
+            ErrorObj.AddPair('error', 'Invalid or expired token');
+            Res.Status(401).Send<TJSONObject>(ErrorObj);
+          except
+            ErrorObj.Free;
+            raise;
+          end;
+          Exit;
+        end;
+
+        // Check route-specific permissions
+        if MatchRoute(Path, MethodToString(Req.MethodType), RequiredRoles) then
+        begin
+          if not HasRequiredRole(Claims.Role, RequiredRoles) then
+          begin
+            ErrorObj := TJSONObject.Create;
+            try
+              ErrorObj.AddPair('error', 'Insufficient permissions for this operation');
+              Res.Status(403).Send<TJSONObject>(ErrorObj);
+            except
+              ErrorObj.Free;
+              raise;
+            end;
+            Exit;
+          end;
+        end;
+
+        // Store claims in request
+        StoreClaimsInRequest(Req, Claims);
+
+        Next;
+      except
+        on E: Exception do
+        begin
+          ErrorObj := TJSONObject.Create;
+          try
+            ErrorObj.AddPair('error', 'Authentication error: ' + E.Message);
+            Res.Status(500).Send<TJSONObject>(ErrorObj);
+          except
+            ErrorObj.Free;
+            raise;
+          end;
+        end;
+      end;
+    end;
+end;
+
+end.

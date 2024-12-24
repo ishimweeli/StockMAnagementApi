@@ -1,0 +1,33 @@
+unit DatabaseModule;
+
+interface
+
+uses
+  System.SysUtils, FireDAC.Comp.Client;
+
+type
+  TDatabaseModule = class
+  private
+    FConnection: TFDConnection;
+  public
+    procedure ConnectDatabase;
+    property Connection: TFDConnection read FConnection;
+  end;
+
+implementation
+
+procedure TDatabaseModule.ConnectDatabase;
+begin
+  FConnection := TFDConnection.Create(nil);
+  FConnection.Params.DriverID := 'PG';
+  FConnection.Params.Database := 'delphi';
+  FConnection.Params.UserName := 'your_username';
+  FConnection.Params.Password := 'your_password';
+  FConnection.Params.Add('sslmode=require');
+  FConnection.Params.Add('Server=pg-26a2e9ad-ishimweeli0-2ded.i.aivencloud.com');
+  FConnection.Params.Add('Port=12043');
+  FConnection.Connected := True;
+end;
+
+end.
+

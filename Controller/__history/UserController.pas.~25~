@@ -1,0 +1,341 @@
+unit UserController;
+
+interface
+
+uses
+  Horse,
+  System.JSON,
+  System.SysUtils,
+  System.Classes,
+  UserService,
+  UserModel,
+  JsonResponseHelper;
+
+type
+  TAuthController = class
+  private
+    FAuthService: TAuthService;
+
+    // Helper methods
+    function GetJsonFromRequest(Req: THorseRequest; out JsonObj: TJSONObject;
+      out ResponseJson: TJSONObject; Res: THorseResponse): Boolean;
+    procedure HandleException(E: Exception; Res: THorseResponse);
+
+  public
+    constructor Create(AAuthService: TAuthService);
+    destructor Destroy; override;
+
+    // Auth endpoints
+    procedure Register(Req: THorseRequest; Res: THorseResponse);
+    procedure Login(Req: THorseRequest; Res: THorseResponse);
+
+    // User management endpoints
+    procedure GetUserProfile(Req: THorseRequest; Res: THorseResponse);
+    procedure UpdateUserProfile(Req: THorseRequest; Res: THorseResponse);
+    procedure ChangePassword(Req: THorseRequest; Res: THorseResponse);
+    procedure DeleteUser(Req: THorseRequest; Res: THorseResponse);
+  end;
+
+implementation
+
+uses
+  System.StrUtils;
+
+{ TAuthController }
+
+constructor TAuthController.Create(AAuthService: TAuthService);
+begin
+  inherited Create;
+  FAuthService := AAuthService;
+end;
+
+destructor TAuthController.Destroy;
+begin
+  inherited;
+end;
+
+function TAuthController.GetJsonFromRequest(Req: THorseRequest;
+  out JsonObj: TJSONObject; out ResponseJson: TJSONObject;
+  Res: THorseResponse): Boolean;
+begin
+  Result := False;
+  JsonObj := nil;
+
+  if (Req.Body = EmptyStr) then
+  begin
+    ResponseJson := TJsonResponseHelper.CreateError('Invalid request body');
+    Res.Status(400).Send<TJSONObject>(ResponseJson);
+    Exit;
+  end;
+
+  try
+    JsonObj := TJSONObject.ParseJSONValue(Req.Body) as TJSONObject;
+    if not Assigned(JsonObj) then
+    begin
+      ResponseJson := TJsonResponseHelper.CreateError('Invalid JSON format');
+      Res.Status(400).Send<TJSONObject>(ResponseJson);
+      Exit;
+    end;
+    Result := True;
+  except
+    on E: Exception do
+    begin
+      ResponseJson := TJsonResponseHelper.CreateError('Invalid JSON format: ' + E.Message);
+      Res.Status(400).Send<TJSONObject>(ResponseJson);
+      Exit;
+    end;
+  end;
+end;
+
+procedure TAuthController.HandleException(E: Exception; Res: THorseResponse);
+var
+  ResponseJson: TJSONObject;
+begin
+  ResponseJson := TJsonResponseHelper.CreateError(E.Message, 500);
+  Res.Status(500)
+     .ContentType('application/json')
+     .Send<TJSONObject>(ResponseJson);
+end;
+
+procedure TAuthController.Register(Req: THorseRequest; Res: THorseResponse);
+var
+  JsonObj: TJSONObject;
+  AuthResponse: TAuthResponse;
+  Role: TUserRole;
+  ResponseJson: TJSONObject;
+begin
+  if not GetJsonFromRequest(Req, JsonObj, ResponseJson, Res) then
+    Exit;
+
+  try
+    // Validate required fields
+    if not (JsonObj.TryGetValue<string>('username', '') and
+            JsonObj.TryGetValue<string>('password', '') and
+            JsonObj.TryGetValue<string>('email', '')) then
+    begin
+      ResponseJson := TJsonResponseHelper.CreateError('Username, password and email are required');
+      Res.Status(400).Send<TJSONObject>(ResponseJson);
+      Exit;
+    end;
+
+    Role := TUserRole(JsonObj.GetValue<Integer>('role', Ord(urStockOfficer)));
+
+    AuthResponse := FAuthService.Register(
+      JsonObj.GetValue<string>('username'),
+      JsonObj.GetValue<string>('password'),
+      JsonObj.GetValue<string>('email'),
+      Role
+    );
+
+    if AuthResponse.Success then
+    begin
+      ResponseJson := TJsonResponseHelper.CreateAuthSuccess(AuthResponse.User, AuthResponse.Token);
+      Res.Status(201)
+         .ContentType('application/json')
+         .Send<TJSONObject>(ResponseJson);
+    end
+    else
+    begin
+      ResponseJson := TJsonResponseHelper.CreateError(AuthResponse.ErrorMessage);
+      Res.Status(400)
+         .ContentType('application/json')
+         .Send<TJSONObject>(ResponseJson);
+    end;
+  except
+    on E: Exception do
+      HandleException(E, Res);
+  end;
+  JsonObj.Free;
+end;
+
+procedure TAuthController.Login(Req: THorseRequest; Res: THorseResponse);
+var
+  JsonObj: TJSONObject;
+  AuthResponse: TAuthResponse;
+  ResponseJson: TJSONObject;
+begin
+  if not GetJsonFromRequest(Req, JsonObj, ResponseJson, Res) then
+    Exit;
+
+  try
+    // Validate required fields
+    if not (JsonObj.TryGetValue<string>('username', '') and
+            JsonObj.TryGetValue<string>('password', '')) then
+    begin
+      ResponseJson := TJsonResponseHelper.CreateError('Username and password are required');
+      Res.Status(400).Send<TJSONObject>(ResponseJson);
+      Exit;
+    end;
+
+    AuthResponse := FAuthService.Login(
+      JsonObj.GetValue<string>('username'),
+      JsonObj.GetValue<string>('password')
+    );
+
+    if AuthResponse.Success then
+    begin
+      ResponseJson := TJsonResponseHelper.CreateAuthSuccess(AuthResponse.User, AuthResponse.Token);
+      Res.Status(200)
+         .ContentType('application/json')
+         .Send<TJSONObject>(ResponseJson);
+    end
+    else
+    begin
+      ResponseJson := TJsonResponseHelper.CreateError(
+        IfThen(AuthResponse.ErrorMessage = '', 'Invalid credentials', AuthResponse.ErrorMessage),
+        401
+      );
+      Res.Status(401)
+         .ContentType('application/json')
+         .Send<TJSONObject>(ResponseJson);
+    end;
+  except
+    on E: Exception do
+      HandleException(E, Res);
+  end;
+  JsonObj.Free;
+end;
+
+procedure TAuthController.GetUserProfile(Req: THorseRequest; Res: THorseResponse);
+var
+  UserId: Integer;
+  User: TUser;
+  ResponseJson: TJSONObject;
+begin
+  try
+    // In a real application, you would get the user ID from the JWT token
+    UserId := StrToIntDef(Req.Params['id'], 0);
+    if UserId = 0 then
+    begin
+      ResponseJson := TJsonResponseHelper.CreateError('Invalid user ID', 400);
+      Res.Status(400).Send<TJSONObject>(ResponseJson);
+      Exit;
+    end;
+
+    User := FAuthService.GetUserById(UserId);
+    if Assigned(User) then
+    begin
+      ResponseJson := TJsonResponseHelper.CreateSuccess('User profile retrieved successfully',
+        TJSONObject.Create
+          .AddPair('id', TJSONNumber.Create(User.Id))
+          .AddPair('username', User.Username)
+          .AddPair('email', User.Email)
+          .AddPair('role', TJSONNumber.Create(Ord(User.Role)))
+      );
+      Res.Status(200)
+         .ContentType('application/json')
+         .Send<TJSONObject>(ResponseJson);
+    end
+    else
+    begin
+      ResponseJson := TJsonResponseHelper.CreateError('User not found', 404);
+      Res.Status(404)
+         .ContentType('application/json')
+         .Send<TJSONObject>(ResponseJson);
+    end;
+  except
+    on E: Exception do
+      HandleException(E, Res);
+  end;
+end;
+
+procedure TAuthController.UpdateUserProfile(Req: THorseRequest; Res: THorseResponse);
+var
+  JsonObj: TJSONObject;
+  ResponseJson: TJSONObject;
+  UserId: Integer;
+begin
+  if not GetJsonFromRequest(Req, JsonObj, ResponseJson, Res) then
+    Exit;
+
+  try
+    UserId := StrToIntDef(Req.Params['id'], 0);
+    if UserId = 0 then
+    begin
+      ResponseJson := TJsonResponseHelper.CreateError('Invalid user ID', 400);
+      Res.Status(400).Send<TJSONObject>(ResponseJson);
+      Exit;
+    end;
+
+    // Update user profile logic here
+    // This would call FAuthService.UpdateUser or similar method
+
+    ResponseJson := TJsonResponseHelper.CreateSuccess('Profile updated successfully');
+    Res.Status(200)
+       .ContentType('application/json')
+       .Send<TJSONObject>(ResponseJson);
+  except
+    on E: Exception do
+      HandleException(E, Res);
+  end;
+  JsonObj.Free;
+end;
+
+procedure TAuthController.ChangePassword(Req: THorseRequest; Res: THorseResponse);
+var
+  JsonObj: TJSONObject;
+  ResponseJson: TJSONObject;
+  UserId: Integer;
+begin
+  if not GetJsonFromRequest(Req, JsonObj, ResponseJson, Res) then
+    Exit;
+
+  try
+    UserId := StrToIntDef(Req.Params['id'], 0);
+    if UserId = 0 then
+    begin
+      ResponseJson := TJsonResponseHelper.CreateError('Invalid user ID', 400);
+      Res.Status(400).Send<TJSONObject>(ResponseJson);
+      Exit;
+    end;
+
+    if not (JsonObj.TryGetValue<string>('currentPassword', '') and
+            JsonObj.TryGetValue<string>('newPassword', '')) then
+    begin
+      ResponseJson := TJsonResponseHelper.CreateError('Current and new password are required');
+      Res.Status(400).Send<TJSONObject>(ResponseJson);
+      Exit;
+    end;
+
+    // Change password logic here
+    // This would call FAuthService.ChangePassword or similar method
+
+    ResponseJson := TJsonResponseHelper.CreateSuccess('Password changed successfully');
+    Res.Status(200)
+       .ContentType('application/json')
+       .Send<TJSONObject>(ResponseJson);
+  except
+    on E: Exception do
+      HandleException(E, Res);
+  end;
+  JsonObj.Free;
+end;
+
+procedure TAuthController.DeleteUser(Req: THorseRequest; Res: THorseResponse);
+var
+  ResponseJson: TJSONObject;
+  UserId: Integer;
+begin
+  try
+    UserId := StrToIntDef(Req.Params['id'], 0);
+    if UserId = 0 then
+    begin
+      ResponseJson := TJsonResponseHelper.CreateError('Invalid user ID', 400);
+      Res.Status(400).Send<TJSONObject>(ResponseJson);
+      Exit;
+    end;
+
+    // Delete user logic here
+    // This would call FAuthService.DeleteUser or similar method
+
+    ResponseJson := TJsonResponseHelper.CreateSuccess('User deleted successfully');
+    Res.Status(200)
+       .ContentType('application/json')
+       .Send<TJSONObject>(ResponseJson);
+  except
+    on E: Exception do
+      HandleException(E, Res);
+  end;
+end;
+
+end.

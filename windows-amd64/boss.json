@@ -1,0 +1,9 @@
+{
+	"name": "esddff",
+	"description": "",
+	"version": "1.0.0",
+	"homepage": "esu",
+	"mainsrc": "./src",
+	"projects": [],
+	"dependencies": {}
+}

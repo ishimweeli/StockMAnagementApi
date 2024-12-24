@@ -1,0 +1,30 @@
+unit CORSMiddleware;
+
+interface
+
+uses
+  Horse,
+  Horse.CORS;
+
+procedure ConfigureCORS(App: THorse);
+
+implementation
+
+procedure ConfigureCORS(App: THorse);
+begin
+  App.Use(
+    CORS(
+      function (ARequest: THorseRequest; AResponse: THorseResponse; ANext: TProc)
+      begin
+        AResponse.RawWebResponse.SetCustomHeader('Access-Control-Allow-Origin', 'http://localhost:3000');
+        AResponse.RawWebResponse.SetCustomHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
+        AResponse.RawWebResponse.SetCustomHeader('Access-Control-Allow-Headers', '*');
+        AResponse.RawWebResponse.SetCustomHeader('Access-Control-Allow-Credentials', 'true');
+        ANext(); // Call the next middleware in the pipeline
+      end
+    )
+  );
+end;
+
+end.
+

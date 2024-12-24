@@ -1,0 +1,119 @@
+unit ServerConst1;
+
+interface
+
+uses
+  Horse,
+  System.SysUtils,
+  System.JSON,
+  DatabaseModule,
+  UserController,
+  UserService;
+
+procedure StartServer;
+
+implementation
+
+var
+  AuthController: TAuthController;
+  AuthService: TAuthService;
+
+procedure StartServer;
+begin
+  try
+    // Set global middleware for JSON responses
+    THorse.Use(
+      procedure(Req: THorseRequest; Res: THorseResponse; Next: TProc)
+      begin
+        Res.ContentType('application/json');
+        try
+          Next();
+        except
+          on E: Exception do
+          begin
+            Res.Send(
+              TJSONObject.Create
+                .AddPair('success', TJSONBool.Create(False))
+                .AddPair('message', E.Message)
+            ).Status(500);
+          end;
+        end;
+      end
+    );
+
+    // Initialize database connection
+    if not Assigned(DatabaseModule1) then
+      DatabaseModule1 := TDatabaseConnection.Create;
+    DatabaseModule1.Connect;
+
+    // Initialize services
+    AuthService := TAuthService.Create;
+
+    // Initialize controllers with their dependencies
+    AuthController := TAuthController.Create(AuthService);
+
+    // Default route handler
+    THorse.Get('/',
+      procedure(Req: THorseRequest; Res: THorseResponse)
+      begin
+        Res.Send(
+          TJSONObject.Create
+            .AddPair('success', TJSONBool.Create(True))
+            .AddPair('message', 'API Server Running')
+        ).Status(200);
+      end
+    );
+
+    // Register authentication routes
+    THorse.Post('/auth/login',
+      procedure(Req: THorseRequest; Res: THorseResponse)
+      begin
+        AuthController.Login(Req, Res);
+      end
+    );
+
+    THorse.Post('/auth/register',
+      procedure(Req: THorseRequest; Res: THorseResponse)
+      begin
+        AuthController.Register(Req, Res);
+      end
+    );
+
+    // 404 handler using standard routing
+    THorse.Get('/*',
+      procedure(Req: THorseRequest; Res: THorseResponse)
+      begin
+        Res.Send(
+          TJSONObject.Create
+            .AddPair('success', TJSONBool.Create(False))
+            .AddPair('message', 'Route not found')
+        ).Status(404);
+      end
+    );
+
+    // Start server
+    Writeln('Server is starting on port 8080...');
+    THorse.Listen(8080);
+  except
+    on E: Exception do
+    begin
+      if Assigned(AuthController) then
+        AuthController.Free;
+      if Assigned(AuthService) then
+        AuthService.Free;
+      raise Exception.Create('Server initialization failed: ' + E.Message);
+    end;
+  end;
+end;
+
+initialization
+  AuthController := nil;
+  AuthService := nil;
+
+finalization
+  if Assigned(AuthController) then
+    AuthController.Free;
+  if Assigned(AuthService) then
+    AuthService.Free;
+
+end.

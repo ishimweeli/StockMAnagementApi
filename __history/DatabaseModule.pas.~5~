@@ -1,0 +1,249 @@
+unit DatabaseModule;
+
+interface
+
+uses
+  System.SysUtils,
+  System.Classes,
+  System.Variants,  // Added for Null support
+  FireDAC.Stan.Intf,
+  FireDAC.Stan.Option,
+  FireDAC.Stan.Error,
+  FireDAC.UI.Intf,
+  FireDAC.Phys.Intf,
+  FireDAC.Stan.Def,
+  FireDAC.Stan.Pool,
+  FireDAC.Stan.Async,
+  FireDAC.Phys,
+  FireDAC.Phys.PG,
+  FireDAC.Phys.PGDef,
+  FireDAC.ConsoleUI.Wait,
+  FireDAC.Comp.Client,
+  FireDAC.Stan.Param,
+  FireDAC.DatS,
+  FireDAC.DApt.Intf,
+  FireDAC.DApt,
+  FireDAC.Comp.DataSet;
+
+type
+  EDatabaseError = class(Exception);
+
+  TDatabaseConnection = class
+  private
+    FConnection: TFDConnection;
+    FQuery: TFDQuery;
+    function GetConnected: Boolean;
+  protected
+    procedure HandleException(const ErrorMsg: string);
+  public
+    constructor Create;
+    destructor Destroy; override;
+
+    procedure Connect;
+    procedure Disconnect;
+    function GetConnection: TFDConnection;
+    function CreateQuery: TFDQuery;
+
+    // Transaction management
+    procedure StartTransaction;
+    procedure Commit;
+    procedure Rollback;
+
+    // Basic database operations
+    function ExecuteSQL(const SQL: string): Integer;
+    function ExecuteScalar(const SQL: string): Variant;
+    function OpenQuery(const SQL: string): TFDQuery;
+
+    property Connected: Boolean read GetConnected;
+  end;
+
+var
+  DatabaseModule1: TDatabaseConnection;
+
+implementation
+
+{ TDatabaseConnection }
+
+constructor TDatabaseConnection.Create;
+begin
+  inherited Create;
+  try
+    FConnection := TFDConnection.Create(nil);
+    FConnection.DriverName := 'PG';
+
+    // Configure connection parameters
+    with FConnection.Params do
+    begin
+      Clear;
+      Add('DriverID=PG');
+      Add('Database=delphi');
+      Add('User_Name=avnadmin');
+      Add('Password=AVNS_Q0X5T_XVb2oEluEesaL');
+      Add('Server=pg-26a2e9ad-ishimweeli0-2ded.i.aivencloud.com');
+      Add('Port=12043');
+      Add('SSLMode=require');
+
+      // Additional connection settings
+      Add('Pooled=True');
+      Add('Pool_MaximumItems=50');
+      Add('Pool_ExpireTimeout=3600');
+      Add('LoginTimeout=30');
+    end;
+
+    // Create a reusable query component
+    FQuery := TFDQuery.Create(nil);
+    FQuery.Connection := FConnection;
+
+  except
+    on E: Exception do
+      HandleException('Error creating database connection: ' + E.Message);
+  end;
+end;
+
+destructor TDatabaseConnection.Destroy;
+begin
+  try
+    if Connected then
+      Disconnect;
+
+    if Assigned(FQuery) then
+      FQuery.Free;
+
+    if Assigned(FConnection) then
+      FConnection.Free;
+
+  finally
+    inherited Destroy;
+  end;
+end;
+
+procedure TDatabaseConnection.Connect;
+begin
+  try
+    if not Connected then
+      FConnection.Connected := True;
+  except
+    on E: Exception do
+      HandleException('Error connecting to database: ' + E.Message);
+  end;
+end;
+
+procedure TDatabaseConnection.Disconnect;
+begin
+  try
+    if Connected then
+      FConnection.Connected := False;
+  except
+    on E: Exception do
+      HandleException('Error disconnecting from database: ' + E.Message);
+  end;
+end;
+
+function TDatabaseConnection.GetConnected: Boolean;
+begin
+  Result := FConnection.Connected;
+end;
+
+function TDatabaseConnection.GetConnection: TFDConnection;
+begin
+  Result := FConnection;
+end;
+
+procedure TDatabaseConnection.HandleException(const ErrorMsg: string);
+begin
+  raise EDatabaseError.Create(ErrorMsg);
+end;
+
+procedure TDatabaseConnection.StartTransaction;
+begin
+  try
+    if not Connected then
+      Connect;
+    FConnection.StartTransaction;
+  except
+    on E: Exception do
+      HandleException('Error starting transaction: ' + E.Message);
+  end;
+end;
+
+procedure TDatabaseConnection.Commit;
+begin
+  try
+    FConnection.Commit;
+  except
+    on E: Exception do
+      HandleException('Error committing transaction: ' + E.Message);
+  end;
+end;
+
+procedure TDatabaseConnection.Rollback;
+begin
+  try
+    FConnection.Rollback;
+  except
+    on E: Exception do
+      HandleException('Error rolling back transaction: ' + E.Message);
+  end;
+end;
+
+function TDatabaseConnection.CreateQuery: TFDQuery;
+begin
+  Result := TFDQuery.Create(nil);
+  Result.Connection := FConnection;
+end;
+
+function TDatabaseConnection.ExecuteSQL(const SQL: string): Integer;
+begin
+  try
+    Result := FConnection.ExecSQL(SQL);
+  except
+    on E: Exception do
+    begin
+      HandleException('Error executing SQL: ' + E.Message);
+      Result := -1;
+    end;
+  end;
+end;
+
+function TDatabaseConnection.ExecuteScalar(const SQL: string): Variant;
+begin
+  try
+    FQuery.Close;
+    FQuery.SQL.Text := SQL;
+    FQuery.Open;
+    if not FQuery.IsEmpty then
+      Result := FQuery.Fields[0].Value
+    else
+      Result := System.Variants.Null;  // Fixed: Using fully qualified Null
+    FQuery.Close;
+  except
+    on E: Exception do
+    begin
+      HandleException('Error executing scalar query: ' + E.Message);
+      Result := System.Variants.Null;  // Fixed: Using fully qualified Null
+    end;
+  end;
+end;
+
+function TDatabaseConnection.OpenQuery(const SQL: string): TFDQuery;
+begin
+  Result := CreateQuery;
+  try
+    Result.SQL.Text := SQL;
+    Result.Open;
+  except
+    on E: Exception do
+    begin
+      Result.Free;
+      HandleException('Error opening query: ' + E.Message);
+    end;
+  end;
+end;
+
+initialization
+  DatabaseModule1 := TDatabaseConnection.Create;
+
+finalization
+  DatabaseModule1.Free;
+
+end.

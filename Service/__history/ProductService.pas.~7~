@@ -1,0 +1,251 @@
+unit ProductService;
+
+interface
+
+uses
+  ProductModel,
+  DatabaseModule,
+  System.SysUtils,
+  System.Generics.Collections,
+  FireDAC.Comp.Client,
+  FireDAC.Stan.Param;
+
+type
+  TStockNotification = (snNone, snLowQuantity, snCriticalQuantity);
+
+  EProductServiceError = class(Exception);
+
+  TProductService = class
+  private
+    function CheckQuantityStatus(const Quantity: Integer): TStockNotification;
+    function ItemExists(const ItemId: Integer; out CurrentQuantity: Integer): Boolean;
+  public
+    function AddItem(const Item: TItem): Boolean;
+    function UpdateItem(const ItemId: Integer; const Item: TItem): Boolean;
+    function DeleteItem(const ItemId: Integer): Boolean;
+    function SellItem(const ItemId: Integer; const Quantity: Integer): TStockNotification;
+    function GetAllItems: TObjectList<TItem>;
+    function GetItemById(const ItemId: Integer): TItem;
+  end;
+
+implementation
+
+function TProductService.ItemExists(const ItemId: Integer; out CurrentQuantity: Integer): Boolean;
+var
+  Query: TFDQuery;
+begin
+  Result := False;
+  CurrentQuantity := 0;
+  Query := DatabaseModule1.CreateQuery;
+  try
+    Query.SQL.Text := 'SELECT quantity FROM products WHERE id = :id';
+    Query.ParamByName('id').AsInteger := ItemId;
+    Query.Open;
+
+    if not Query.IsEmpty then
+    begin
+      Result := True;
+      CurrentQuantity := Query.FieldByName('quantity').AsInteger;
+    end;
+  finally
+    Query.Free;
+  end;
+end;
+
+function TProductService.CheckQuantityStatus(const Quantity: Integer): TStockNotification;
+begin
+  if Quantity <= 5 then
+    Result := snCriticalQuantity
+  else if Quantity <= 25 then
+    Result := snLowQuantity
+  else
+    Result := snNone;
+end;
+
+function TProductService.AddItem(const Item: TItem): Boolean;
+var
+  Query: TFDQuery;
+begin
+  Result := False;
+  if Item.Quantity < 0 then
+    raise EProductServiceError.Create('Quantity cannot be negative');
+
+  if Item.Price <= 0 then
+    raise EProductServiceError.Create('Price must be greater than zero');
+
+  Query := DatabaseModule1.CreateQuery;
+  try
+    DatabaseModule1.StartTransaction;
+    try
+      Query.SQL.Text := 'INSERT INTO products (name, quantity, price) VALUES (:name, :quantity, :price)';
+      Query.ParamByName('name').AsString := Item.Name;
+      Query.ParamByName('quantity').AsInteger := Item.Quantity;
+      Query.ParamByName('price').AsFloat := Item.Price;
+      Query.ExecSQL;
+
+      DatabaseModule1.Commit;
+      Result := True;
+    except
+      DatabaseModule1.Rollback;
+      raise;
+    end;
+  finally
+    Query.Free;
+  end;
+end;
+
+function TProductService.UpdateItem(const ItemId: Integer; const Item: TItem): Boolean;
+var
+  Query: TFDQuery;
+  CurrentQuantity: Integer;
+begin
+  Result := False;
+
+  if not ItemExists(ItemId, CurrentQuantity) then
+    raise EProductServiceError.Create('Item not found');
+
+  if Item.Quantity < 0 then
+    raise EProductServiceError.Create('Quantity cannot be negative');
+
+  if Item.Price <= 0 then
+    raise EProductServiceError.Create('Price must be greater than zero');
+
+  Query := DatabaseModule1.CreateQuery;
+  try
+    DatabaseModule1.StartTransaction;
+    try
+      Query.SQL.Text := 'UPDATE products SET name = :name, quantity = :quantity, price = :price WHERE id = :id';
+      Query.ParamByName('name').AsString := Item.Name;
+      Query.ParamByName('quantity').AsInteger := Item.Quantity;
+      Query.ParamByName('price').AsFloat := Item.Price;
+      Query.ParamByName('id').AsInteger := ItemId;
+      Query.ExecSQL;
+
+      DatabaseModule1.Commit;
+      Result := True;
+    except
+      DatabaseModule1.Rollback;
+      raise;
+    end;
+  finally
+    Query.Free;
+  end;
+end;
+
+function TProductService.DeleteItem(const ItemId: Integer): Boolean;
+var
+  Query: TFDQuery;
+  CurrentQuantity: Integer;
+begin
+  Result := False;
+
+  if not ItemExists(ItemId, CurrentQuantity) then
+    raise EProductServiceError.Create('Item not found');
+
+  Query := DatabaseModule1.CreateQuery;
+  try
+    DatabaseModule1.StartTransaction;
+    try
+      Query.SQL.Text := 'DELETE FROM products WHERE id = :id';
+      Query.ParamByName('id').AsInteger := ItemId;
+      Query.ExecSQL;
+
+      DatabaseModule1.Commit;
+      Result := True;
+    except
+      DatabaseModule1.Rollback;
+      raise;
+    end;
+  finally
+    Query.Free;
+  end;
+end;
+
+function TProductService.SellItem(const ItemId: Integer; const Quantity: Integer): TStockNotification;
+var
+  Query: TFDQuery;
+  CurrentQuantity: Integer;
+begin
+  Result := snNone;
+
+  if Quantity <= 0 then
+    raise EProductServiceError.Create('Quantity must be greater than zero');
+
+  if not ItemExists(ItemId, CurrentQuantity) then
+    raise EProductServiceError.Create('Item not found');
+
+  if CurrentQuantity < Quantity then
+    raise EProductServiceError.Create('Insufficient stock');
+
+  Query := DatabaseModule1.CreateQuery;
+  try
+    DatabaseModule1.StartTransaction;
+    try
+      Query.SQL.Text := 'UPDATE products SET quantity = quantity - :sold WHERE id = :id';
+      Query.ParamByName('sold').AsInteger := Quantity;
+      Query.ParamByName('id').AsInteger := ItemId;
+      Query.ExecSQL;
+
+      Result := CheckQuantityStatus(CurrentQuantity - Quantity);
+      DatabaseModule1.Commit;
+    except
+      DatabaseModule1.Rollback;
+      raise;
+    end;
+  finally
+    Query.Free;
+  end;
+end;
+
+function TProductService.GetAllItems: TObjectList<TItem>;
+var
+  Query: TFDQuery;
+  Item: TItem;
+begin
+  Result := TObjectList<TItem>.Create(True);
+  Query := DatabaseModule1.CreateQuery;
+  try
+    Query.SQL.Text := 'SELECT * FROM products ORDER BY name';
+    Query.Open;
+
+    while not Query.Eof do
+    begin
+      Item := TItem.Create;
+      Item.Id := Query.FieldByName('id').AsInteger;
+      Item.Name := Query.FieldByName('name').AsString;
+      Item.Quantity := Query.FieldByName('quantity').AsInteger;
+      Item.Price := Query.FieldByName('price').AsFloat;
+      Result.Add(Item);
+      Query.Next;
+    end;
+  finally
+    Query.Free;
+  end;
+end;
+
+function TProductService.GetItemById(const ItemId: Integer): TItem;
+var
+  Query: TFDQuery;
+begin
+  Result := nil;
+  Query := DatabaseModule1.CreateQuery;
+  try
+    Query.SQL.Text := 'SELECT * FROM products WHERE id = :id';
+    Query.ParamByName('id').AsInteger := ItemId;
+    Query.Open;
+
+    if not Query.IsEmpty then
+    begin
+      Result := TItem.Create;
+      Result.Id := Query.FieldByName('id').AsInteger;
+      Result.Name := Query.FieldByName('name').AsString;
+      Result.Quantity := Query.FieldByName('quantity').AsInteger;
+      Result.Price := Query.FieldByName('price').AsFloat;
+    end;
+  finally
+    Query.Free;
+  end;
+end;
+
+end.
+

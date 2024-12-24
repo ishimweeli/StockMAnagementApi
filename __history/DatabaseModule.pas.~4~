@@ -1,0 +1,56 @@
+unit DatabaseModule;
+
+interface
+
+uses
+  System.SysUtils, FireDAC.Comp.Client, FireDAC.Stan.Def, FireDAC.Stan.Pool,
+  FireDAC.Stan.Async, FireDAC.Phys, FireDAC.Phys.PG, FireDAC.Phys.PGDef;
+
+type
+  TDatabaseConnection = class
+  private
+    FConnection: TFDConnection;
+  public
+    constructor Create;
+    destructor Destroy; override;
+    function GetConnection: TFDConnection;
+  end;
+
+var
+  DatabaseModule1: TDatabaseConnection;
+
+implementation
+
+constructor TDatabaseConnection.Create;
+begin
+  FConnection := TFDConnection.Create(nil);
+  FConnection.DriverName := 'PG';
+  FConnection.Params.Values['DriverID'] := 'PG';
+  FConnection.Params.Values['Database'] := 'delphi';
+  FConnection.Params.Values['User_Name'] := 'avnadmin';
+  FConnection.Params.Values['Password'] := 'AVNS_Q0X5T_XVb2oEluEesaL';
+  FConnection.Params.Values['Server'] := 'pg-26a2e9ad-ishimweeli0-2ded.i.aivencloud.com';
+  FConnection.Params.Values['Port'] := '12043';
+  FConnection.Params.Values['SSLMode'] := 'require';
+  FConnection.Connected := True; // Establish connection immediately
+end;
+
+destructor TDatabaseConnection.Destroy;
+begin
+  FConnection.Free;
+  inherited;
+end;
+
+function TDatabaseConnection.GetConnection: TFDConnection;
+begin
+  Result := FConnection;
+end;
+
+initialization
+  DatabaseModule1 := TDatabaseConnection.Create;
+
+finalization
+  DatabaseModule1.Free;
+
+end.
+
