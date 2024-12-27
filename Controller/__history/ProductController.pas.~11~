@@ -1,0 +1,468 @@
+unit ProductController;
+
+interface
+
+uses
+  Horse,
+  System.JSON,
+  System.SysUtils,
+  System.Classes,
+  System.StrUtils,
+  System.Generics.Collections,
+  ProductService,
+  ProductModel,
+  UserModel,
+  JsonResponseHelper;
+
+type
+  TProductController = class
+  private
+    FProductService: TProductService;
+
+    function GetJsonFromRequest(Req: THorseRequest; out JsonObj: TJSONObject;
+      out ResponseJson: TJSONObject; Res: THorseResponse): Boolean;
+    procedure HandleException(E: Exception; Res: THorseResponse);
+    function ValidateRequiredFields(const JsonObj: TJSONObject;
+      const Fields: array of string; out MissingField: string): Boolean;
+    function ValidateItemData(const JsonObj: TJSONObject; out Item: TItem;
+      out ResponseJson: TJSONObject): Boolean;
+
+  public
+    constructor Create(AProductService: TProductService);
+    destructor Destroy; override;
+
+    procedure AddItem(Req: THorseRequest; Res: THorseResponse);
+    procedure UpdateItem(Req: THorseRequest; Res: THorseResponse);
+    procedure DeleteItem(Req: THorseRequest; Res: THorseResponse);
+    procedure GetItems(Req: THorseRequest; Res: THorseResponse);
+    procedure GetItemById(Req: THorseRequest; Res: THorseResponse);
+    procedure SellItem(Req: THorseRequest; Res: THorseResponse);
+    procedure GetNotifications(Req: THorseRequest; Res: THorseResponse);
+
+
+  end;
+
+implementation
+
+{ TProductController }
+
+constructor TProductController.Create(AProductService: TProductService);
+begin
+  inherited Create;
+  FProductService := AProductService;
+end;
+
+destructor TProductController.Destroy;
+begin
+  inherited;
+end;
+
+function TProductController.GetJsonFromRequest(Req: THorseRequest;
+  out JsonObj: TJSONObject; out ResponseJson: TJSONObject;
+  Res: THorseResponse): Boolean;
+begin
+  Result := False;
+  JsonObj := nil;
+
+  if (Req.Body = EmptyStr) then
+  begin
+    ResponseJson := TJsonResponseHelper.CreateError('Invalid request body');
+    Res.Status(400).Send<TJSONObject>(ResponseJson);
+    Exit;
+  end;
+
+  try
+    JsonObj := TJSONObject.ParseJSONValue(Req.Body) as TJSONObject;
+    if not Assigned(JsonObj) then
+    begin
+      ResponseJson := TJsonResponseHelper.CreateError('Invalid JSON format');
+      Res.Status(400).Send<TJSONObject>(ResponseJson);
+      Exit;
+    end;
+    Result := True;
+  except
+    on E: Exception do
+    begin
+      ResponseJson := TJsonResponseHelper.CreateError('Invalid JSON format: ' + E.Message);
+      Res.Status(400).Send<TJSONObject>(ResponseJson);
+      Exit;
+    end;
+  end;
+end;
+
+function TProductController.ValidateRequiredFields(const JsonObj: TJSONObject;
+  const Fields: array of string; out MissingField: string): Boolean;
+var
+  Field: string;
+begin
+  Result := True;
+  for Field in Fields do
+  begin
+    if not JsonObj.TryGetValue<string>(Field, MissingField) then
+    begin
+      MissingField := Field;
+      Result := False;
+      Exit;
+    end;
+  end;
+end;
+
+function TProductController.ValidateItemData(const JsonObj: TJSONObject;
+  out Item: TItem; out ResponseJson: TJSONObject): Boolean;
+var
+  MissingField: string;
+begin
+  Result := False;
+  Item := nil;
+
+  // Validate required fields
+  if not ValidateRequiredFields(JsonObj, ['name', 'quantity', 'price'], MissingField) then
+  begin
+    ResponseJson := TJsonResponseHelper.CreateError(MissingField + ' is required');
+    Exit;
+  end;
+
+  try
+    Item := TItem.Create;
+    Item.Name := JsonObj.GetValue<string>('name');
+    Item.Quantity := JsonObj.GetValue<Integer>('quantity');
+    Item.Price := JsonObj.GetValue<Double>('price');
+
+    // Validate values
+    if Item.Quantity < 0 then
+    begin
+      ResponseJson := TJsonResponseHelper.CreateError('Quantity cannot be negative');
+      Exit;
+    end;
+
+    if Item.Price <= 0 then
+    begin
+      ResponseJson := TJsonResponseHelper.CreateError('Price must be greater than zero');
+      Exit;
+    end;
+
+    Result := True;
+  except
+    on E: Exception do
+    begin
+      Item.Free;
+      Item := nil;
+      ResponseJson := TJsonResponseHelper.CreateError('Invalid item data: ' + E.Message);
+    end;
+  end;
+end;
+
+procedure TProductController.HandleException(E: Exception; Res: THorseResponse);
+var
+  ResponseJson: TJSONObject;
+begin
+  ResponseJson := TJsonResponseHelper.CreateError(E.Message);
+  Res.Status(500)
+     .ContentType('application/json')
+     .Send<TJSONObject>(ResponseJson);
+end;
+
+procedure TProductController.AddItem(Req: THorseRequest; Res: THorseResponse);
+var
+  JsonObj: TJSONObject;
+  ResponseJson: TJSONObject;
+  Item: TItem;
+begin
+  if not GetJsonFromRequest(Req, JsonObj, ResponseJson, Res) then
+    Exit;
+
+  try
+    if not ValidateItemData(JsonObj, Item, ResponseJson) then
+    begin
+      Res.Status(400).Send<TJSONObject>(ResponseJson);
+      Exit;
+    end;
+
+    try
+      if FProductService.AddItem(Item) then
+      begin
+        ResponseJson := TJsonResponseHelper.CreateSuccess('Item added successfully');
+        Res.Status(201)
+           .ContentType('application/json')
+           .Send<TJSONObject>(ResponseJson);
+      end
+      else
+      begin
+        ResponseJson := TJsonResponseHelper.CreateError('Failed to add item');
+        Res.Status(400)
+           .ContentType('application/json')
+           .Send<TJSONObject>(ResponseJson);
+      end;
+    finally
+      Item.Free;
+    end;
+  except
+    on E: Exception do
+      HandleException(E, Res);
+  end;
+  JsonObj.Free;
+end;
+
+procedure TProductController.UpdateItem(Req: THorseRequest; Res: THorseResponse);
+var
+  JsonObj: TJSONObject;
+  ResponseJson: TJSONObject;
+  Item: TItem;
+  ItemId: Integer;
+begin
+  if not GetJsonFromRequest(Req, JsonObj, ResponseJson, Res) then
+    Exit;
+
+  try
+    ItemId := StrToIntDef(Req.Params['id'], 0);
+    if ItemId = 0 then
+    begin
+      ResponseJson := TJsonResponseHelper.CreateError('Invalid item ID');
+      Res.Status(400).Send<TJSONObject>(ResponseJson);
+      Exit;
+    end;
+
+    if not ValidateItemData(JsonObj, Item, ResponseJson) then
+    begin
+      Res.Status(400).Send<TJSONObject>(ResponseJson);
+      Exit;
+    end;
+
+    try
+      if FProductService.UpdateItem(ItemId, Item) then
+      begin
+        ResponseJson := TJsonResponseHelper.CreateSuccess('Item updated successfully');
+        Res.Status(200)
+           .ContentType('application/json')
+           .Send<TJSONObject>(ResponseJson);
+      end
+      else
+      begin
+        ResponseJson := TJsonResponseHelper.CreateError('Failed to update item');
+        Res.Status(400)
+           .ContentType('application/json')
+           .Send<TJSONObject>(ResponseJson);
+      end;
+    finally
+      Item.Free;
+    end;
+  except
+    on E: Exception do
+      HandleException(E, Res);
+  end;
+  JsonObj.Free;
+end;
+
+procedure TProductController.DeleteItem(Req: THorseRequest; Res: THorseResponse);
+var
+  ResponseJson: TJSONObject;
+  ItemId: Integer;
+begin
+  try
+    ItemId := StrToIntDef(Req.Params['id'], 0);
+    if ItemId = 0 then
+    begin
+      ResponseJson := TJsonResponseHelper.CreateError('Invalid item ID');
+      Res.Status(400).Send<TJSONObject>(ResponseJson);
+      Exit;
+    end;
+
+    if FProductService.DeleteItem(ItemId) then
+    begin
+      ResponseJson := TJsonResponseHelper.CreateSuccess('Item deleted successfully');
+      Res.Status(200)
+         .ContentType('application/json')
+         .Send<TJSONObject>(ResponseJson);
+    end
+    else
+    begin
+      ResponseJson := TJsonResponseHelper.CreateError('Failed to delete item');
+      Res.Status(400)
+         .ContentType('application/json')
+         .Send<TJSONObject>(ResponseJson);
+    end;
+  except
+    on E: Exception do
+      HandleException(E, Res);
+  end;
+end;
+
+procedure TProductController.GetItems(Req: THorseRequest; Res: THorseResponse);
+var
+  Items: TObjectList<TItem>;
+  JsonArray: TJSONArray;
+  ResponseJson: TJSONObject;
+begin
+  try
+    Items := FProductService.GetAllItems;
+    try
+      JsonArray := TJSONArray.Create;
+      for var Item in Items do
+      begin
+        JsonArray.AddElement(
+          TJSONObject.Create
+            .AddPair('id', TJSONNumber.Create(Item.Id))
+            .AddPair('name', Item.Name)
+            .AddPair('quantity', TJSONNumber.Create(Item.Quantity))
+            .AddPair('price', TJSONNumber.Create(Item.Price))
+        );
+      end;
+
+      ResponseJson := TJsonResponseHelper.CreateSuccess('Items retrieved successfully', JsonArray);
+      Res.Status(200)
+         .ContentType('application/json')
+         .Send<TJSONObject>(ResponseJson);
+    finally
+      Items.Free;
+    end;
+  except
+    on E: Exception do
+      HandleException(E, Res);
+  end;
+end;
+
+procedure TProductController.GetItemById(Req: THorseRequest; Res: THorseResponse);
+var
+  ResponseJson: TJSONObject;
+  ItemId: Integer;
+  Item: TItem;
+begin
+  try
+    ItemId := StrToIntDef(Req.Params['id'], 0);
+    if ItemId = 0 then
+    begin
+      ResponseJson := TJsonResponseHelper.CreateError('Invalid item ID');
+      Res.Status(400).Send<TJSONObject>(ResponseJson);
+      Exit;
+    end;
+
+    Item := FProductService.GetItemById(ItemId);
+    if Assigned(Item) then
+    try
+      ResponseJson := TJsonResponseHelper.CreateSuccess('Item retrieved successfully',
+        TJSONObject.Create
+          .AddPair('id', TJSONNumber.Create(Item.Id))
+          .AddPair('name', Item.Name)
+          .AddPair('quantity', TJSONNumber.Create(Item.Quantity))
+          .AddPair('price', TJSONNumber.Create(Item.Price))
+      );
+      Res.Status(200)
+         .ContentType('application/json')
+         .Send<TJSONObject>(ResponseJson);
+    finally
+      Item.Free;
+    end
+    else
+    begin
+      ResponseJson := TJsonResponseHelper.CreateError('Item not found', 404);
+      Res.Status(404)
+         .ContentType('application/json')
+         .Send<TJSONObject>(ResponseJson);
+    end;
+  except
+    on E: Exception do
+      HandleException(E, Res);
+  end;
+end;
+
+procedure TProductController.SellItem(Req: THorseRequest; Res: THorseResponse);
+var
+  JsonObj: TJSONObject;
+  ResponseJson: TJSONObject;
+  ItemId: Integer;
+  Quantity: Integer;
+  Notification: TStockNotification;
+begin
+  if not GetJsonFromRequest(Req, JsonObj, ResponseJson, Res) then
+    Exit;
+
+  try
+    ItemId := StrToIntDef(Req.Params['id'], 0);
+    if ItemId = 0 then
+    begin
+      ResponseJson := TJsonResponseHelper.CreateError('Invalid item ID');
+      Res.Status(400).Send<TJSONObject>(ResponseJson);
+      Exit;
+    end;
+
+    if not JsonObj.TryGetValue<Integer>('quantity', Quantity) then
+    begin
+      ResponseJson := TJsonResponseHelper.CreateError('Quantity is required');
+      Res.Status(400).Send<TJSONObject>(ResponseJson);
+      Exit;
+    end;
+
+    if Quantity <= 0 then
+    begin
+      ResponseJson := TJsonResponseHelper.CreateError('Quantity must be greater than zero');
+      Res.Status(400).Send<TJSONObject>(ResponseJson);
+      Exit;
+    end;
+
+    Notification := FProductService.SellItem(ItemId, Quantity);
+
+    case Notification of
+      snNone:
+        ResponseJson := TJsonResponseHelper.CreateSuccess('Sale completed successfully');
+      snLowQuantity:
+        ResponseJson := TJsonResponseHelper.CreateSuccess('Sale completed successfully. Warning: Stock quantity is low',
+          TJSONObject.Create.AddPair('notification', 'Low stock warning'));
+      snCriticalQuantity:
+        ResponseJson := TJsonResponseHelper.CreateSuccess('Sale completed successfully. Warning: Stock quantity is critical',
+          TJSONObject.Create.AddPair('notification', 'Critical stock warning'));
+    end;
+
+    Res.Status(200)
+       .ContentType('application/json')
+       .Send<TJSONObject>(ResponseJson);
+  except
+    on E: Exception do
+      HandleException(E, Res);
+  end;
+  JsonObj.Free;
+end;
+
+procedure TProductController.GetNotifications(Req: THorseRequest; Res: THorseResponse);
+var
+  Notifications: TObjectList<TNotification>;
+  JsonArray: TJSONArray;
+  ResponseJson: TJSONObject;
+  NotificationTypeStr: string;
+begin
+  try
+    Notifications := FProductService.GetNotifications;
+    try
+      JsonArray := TJSONArray.Create;
+      for var Notification in Notifications do
+      begin
+        case Notification.NotificationType of
+          ntLowStock: NotificationTypeStr := 'Low Stock';
+          ntCriticalStock: NotificationTypeStr := 'Critical Stock';
+        end;
+
+        JsonArray.AddElement(
+          TJSONObject.Create
+            .AddPair('id', TJSONNumber.Create(Notification.Id))
+            .AddPair('product_id', TJSONNumber.Create(Notification.ProductId))
+            .AddPair('product_name', Notification.ProductName)
+            .AddPair('type', NotificationTypeStr)
+            .AddPair('message', Notification.Message)
+            .AddPair('created_at', DateTimeToStr(Notification.CreatedAt))
+        );
+      end;
+
+      ResponseJson := TJsonResponseHelper.CreateSuccess('Notifications retrieved successfully', JsonArray);
+      Res.Status(200)
+         .ContentType('application/json')
+         .Send<TJSONObject>(ResponseJson);
+    finally
+      Notifications.Free;
+    end;
+  except
+    on E: Exception do
+      HandleException(E, Res);
+  end;
+end;
+
+
+end.
