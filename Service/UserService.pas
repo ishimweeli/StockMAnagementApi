@@ -26,7 +26,7 @@ type
   TJWTManager = class
   private
     const
-      SECRET_KEY = 'your-secret-key-here'; // In production, this should be stored securely
+      SECRET_KEY = 'your-secret-key-here';
       TOKEN_EXPIRY_HOURS = 24;
   public
     class function GenerateToken(const Claims: TJWTClaims): string;

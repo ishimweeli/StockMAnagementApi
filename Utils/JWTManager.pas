@@ -18,7 +18,7 @@ type
   TJWTManager = class
   private
     const
-      SECRET_KEY = 'your-secret-key-here'; // In production, this should be stored securely
+      SECRET_KEY = 'your-secret-key-here';
       TOKEN_EXPIRY_HOURS = 24;
   public
     class function GenerateToken(const Claims: TJWTClaims): string;
@@ -51,9 +51,9 @@ begin
     JWT.Claims.Expiration := IncHour(Now, TOKEN_EXPIRY_HOURS);
 
     // Set custom claims
-    JWT.Claims.JSON.AddPair('uid', TJSONNumber.Create(Claims.UserId));
+    JWT.Claims.JSON.AddPair('id', TJSONNumber.Create(Claims.UserId));
     JWT.Claims.JSON.AddPair('username', Claims.Username);
-    JWT.Claims.JSON.AddPair('role', TJSONNumber.Create(Ord(Claims.Role)));
+    JWT.Claims.JSON.AddPair('role', TJSONNumber.Create(Integer(Claims.Role))); // Explicitly cast to Integer
 
     // Sign and create token
     Result := TJOSE.SHA256CompactToken(SECRET_KEY, JWT);
@@ -66,26 +66,40 @@ class function TJWTManager.ValidateToken(const Token: string; out Claims: TJWTCl
 var
   JWT: TJWT;
   ClaimValue: TJSONValue;
+  RoleValue: Integer;
 begin
   Result := False;
+
   if Token = '' then
     Exit;
 
   try
     JWT := TJOSE.Verify(SECRET_KEY, Token);
     try
+      // Check if token is verified and not expired
       if not (JWT.Verified and (JWT.Claims.Expiration > Now)) then
         Exit;
 
-      // Extract claims
-      ClaimValue := JWT.Claims.JSON.GetValue('uid');
+      // Extract and validate user ID
+      ClaimValue := JWT.Claims.JSON.GetValue('id');
       if not Assigned(ClaimValue) then
         Exit;
 
+      // Extract and validate role
+      ClaimValue := JWT.Claims.JSON.GetValue('role');
+      if not Assigned(ClaimValue) then
+        Exit;
+
+      RoleValue := (ClaimValue as TJSONNumber).AsInt;
+      // Validate that role value is within valid range
+      if not (RoleValue in [Integer(urAdmin)..Integer(urStockOfficer)]) then
+        Exit;
+
+      // Create claims object with validated data
       Claims := TJWTClaims.Create(
-        (ClaimValue as TJSONNumber).AsInt,
+        (JWT.Claims.JSON.GetValue('id') as TJSONNumber).AsInt,
         JWT.Claims.JSON.GetValue('username').Value,
-        TUserRole((JWT.Claims.JSON.GetValue('role') as TJSONNumber).AsInt)
+        TUserRole(RoleValue)
       );
 
       Result := True;
@@ -103,6 +117,7 @@ var
   ClaimValue: TJSONValue;
 begin
   Result := 0;
+
   if Token = '' then
     Exit;
 
@@ -111,7 +126,7 @@ begin
     try
       if JWT.Verified then
       begin
-        ClaimValue := JWT.Claims.JSON.GetValue('uid');
+        ClaimValue := JWT.Claims.JSON.GetValue('id');
         if Assigned(ClaimValue) then
           Result := (ClaimValue as TJSONNumber).AsInt;
       end;
@@ -127,8 +142,10 @@ class function TJWTManager.GetRoleFromToken(const Token: string): TUserRole;
 var
   JWT: TJWT;
   ClaimValue: TJSONValue;
+  RoleValue: Integer;
 begin
   Result := urStockOfficer; // Default to lowest privilege level
+
   if Token = '' then
     Exit;
 
@@ -139,7 +156,12 @@ begin
       begin
         ClaimValue := JWT.Claims.JSON.GetValue('role');
         if Assigned(ClaimValue) then
-          Result := TUserRole((ClaimValue as TJSONNumber).AsInt);
+        begin
+          RoleValue := (ClaimValue as TJSONNumber).AsInt;
+          // Validate role value before converting
+          if RoleValue in [Integer(urAdmin)..Integer(urStockOfficer)] then
+            Result := TUserRole(RoleValue);
+        end;
       end;
     finally
       JWT.Free;

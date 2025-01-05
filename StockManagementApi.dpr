@@ -9,6 +9,10 @@ uses
   Horse.JWT,
   Horse.BasicAuthentication,
   Horse.CORS,
+  JOSE.Core.JWT,
+  JOSE.Core.Builder,
+  JOSE.Core.JWA,
+  JOSE.Types.JSON,
   FireDAC.Stan.Param,
   DatabaseModule in 'DatabaseModule.pas',
   UserModel in 'Models\UserModel.pas',
@@ -17,11 +21,255 @@ uses
   ProductService in 'Service\ProductService.pas',
   UserController in 'Controller\UserController.pas',
   ProductController in 'Controller\ProductController.pas',
-  AuthMiddleware in 'Middleware\AuthMiddleware.pas',
   JsonResponseHelper in 'Utils\JsonResponseHelper.pas',
-  JWTManager in 'Utils\JWTManager.pas',
   CORSMiddleware in 'Middleware\CORSMiddleware.pas',
   NotificationModel in 'Models\NotificationModel.pas';
+
+const
+  SECRET_KEY = 'your-secret-key-here';
+  TOKEN_EXPIRY_HOURS = 24;
+
+resourcestring
+  ERR_NO_TOKEN = 'No authorization token provided';
+  ERR_UNAUTHORIZED = 'Unauthorized: Insufficient role permissions';
+  ERR_INVALID_TOKEN = 'Invalid or expired token';
+
+type
+  TNextProc = TProc;
+
+  TJWTClaims = record
+    UserId: Integer;
+    Username: string;
+    Role: UserModel.TUserRole;
+    constructor Create(AUserId: Integer; const AUsername: string; ARole: UserModel.TUserRole);
+  end;
+
+{ TJWTClaims }
+
+constructor TJWTClaims.Create(AUserId: Integer; const AUsername: string; ARole: UserModel.TUserRole);
+begin
+  UserId := AUserId;
+  Username := AUsername;
+  Role := ARole;
+end;
+
+
+function ValidateToken(const Token: string): Boolean;
+var
+  JWT: TJWT;
+begin
+  Result := False;
+  if Token = '' then
+    Exit;
+
+  try
+    JWT := TJOSE.Verify(SECRET_KEY, Token);
+    try
+      Result := JWT.Verified and (JWT.Claims.Expiration > Now);
+    finally
+      JWT.Free;
+    end;
+  except
+    Result := False;
+  end;
+end;
+
+function GetUserIdFromToken(const Token: string): Integer;
+var
+  JWT: TJWT;
+begin
+  Result := 0;
+  if not ValidateToken(Token) then
+    Exit;
+
+  JWT := TJOSE.Verify(SECRET_KEY, Token);
+  try
+    Result := StrToIntDef(JWT.Claims.Subject, 0);
+  finally
+    JWT.Free;
+  end;
+end;
+
+function GetRoleFromToken(const Token: string): UserModel.TUserRole;
+var
+  JWT: TJWT;
+  RoleValue: TJSONValue;
+begin
+  Result := UserModel.TUserRole.urAdmin;
+  if not ValidateToken(Token) then
+    Exit;
+
+  JWT := TJOSE.Verify(SECRET_KEY, Token);
+  try
+    RoleValue := JWT.Claims.JSON.GetValue('role');
+    if Assigned(RoleValue) then
+      Result := UserModel.TUserRole(TJSONNumber(RoleValue).AsInt);
+  finally
+    JWT.Free;
+  end;
+end;
+
+procedure RoleMiddleware(Req: THorseRequest; Res: THorseResponse; Next: TNextProc;
+  RequiredRole: UserModel.TUserRole);
+var
+  Token: string;
+  TokenRole: UserModel.TUserRole;
+begin
+  Token := Req.Headers['Authorization'];
+  if Token.IsEmpty then
+  begin
+    Res.Status(THTTPStatus.Unauthorized)
+       .Send<TJSONObject>(TJSONObject.Create.AddPair('error', ERR_NO_TOKEN));
+    Exit;
+  end;
+
+  if Token.StartsWith('Bearer ', True) then
+    Token := Token.Substring(7);
+
+  try
+    if ValidateToken(Token) then
+    begin
+      TokenRole := GetRoleFromToken(Token);
+      if (TokenRole = urAdmin) or (TokenRole = RequiredRole) then
+        Next()
+      else
+        Res.Status(THTTPStatus.Forbidden)
+           .Send<TJSONObject>(TJSONObject.Create.AddPair('error', ERR_UNAUTHORIZED));
+    end
+    else
+      Res.Status(THTTPStatus.Unauthorized)
+         .Send<TJSONObject>(TJSONObject.Create.AddPair('error', ERR_INVALID_TOKEN));
+  except
+    on E: Exception do
+      Res.Status(THTTPStatus.Unauthorized)
+         .Send<TJSONObject>(TJSONObject.Create.AddPair('error', 'Token validation error: ' + E.Message));
+  end;
+end;
+
+procedure AuthMiddleware(Req: THorseRequest; Res: THorseResponse; Next: TNextProc);
+var
+  Token: string;
+begin
+  Token := Req.Headers['Authorization'];
+  if Token.IsEmpty then
+  begin
+    Res.Status(THTTPStatus.Unauthorized)
+       .Send<TJSONObject>(TJSONObject.Create.AddPair('error', ERR_NO_TOKEN));
+    Exit;
+  end;
+
+  if Token.StartsWith('Bearer ', True) then
+    Token := Token.Substring(7);
+
+  try
+    if ValidateToken(Token) then
+      Next()
+    else
+      Res.Status(THTTPStatus.Unauthorized)
+         .Send<TJSONObject>(TJSONObject.Create.AddPair('error', ERR_INVALID_TOKEN));
+  except
+    on E: Exception do
+      Res.Status(THTTPStatus.Unauthorized)
+         .Send<TJSONObject>(TJSONObject.Create.AddPair('error', ERR_INVALID_TOKEN));
+  end;
+end;
+
+procedure ConfigurePublicRoutes(App: THorse; AuthController: TAuthController);
+begin
+  App.Post('/auth/register',
+    procedure(Req: THorseRequest; Res: THorseResponse; Next: TProc)
+    begin
+      AuthController.Register(Req, Res);
+    end);
+
+  App.Post('/auth/login',
+    procedure(Req: THorseRequest; Res: THorseResponse; Next: TProc)
+    begin
+      AuthController.Login(Req, Res);
+    end);
+end;
+
+procedure ConfigureUserRoutes(App: THorse; AuthController: TAuthController);
+begin
+  App.Get('/users/:id',
+    procedure(Req: THorseRequest; Res: THorseResponse; Next: TProc)
+    begin
+      AuthController.GetUserProfile(Req, Res);
+    end);
+
+  App.Put('/users/:id',
+    procedure(Req: THorseRequest; Res: THorseResponse; Next: TProc)
+    begin
+      AuthController.UpdateUserProfile(Req, Res);
+    end);
+end;
+
+procedure ConfigureAdminRoutes(App: THorse; ProductController: TProductController);
+begin
+  App.Post('/products',
+    procedure(Req: THorseRequest; Res: THorseResponse; Next: TProc)
+    begin
+      RoleMiddleware(Req, Res,
+        procedure
+        begin
+          ProductController.AddItem(Req, Res);
+        end, urAdmin);
+    end);
+
+  App.Put('/products/:id',
+    procedure(Req: THorseRequest; Res: THorseResponse; Next: TProc)
+    begin
+      RoleMiddleware(Req, Res,
+        procedure
+        begin
+          ProductController.UpdateItem(Req, Res);
+        end, urAdmin);
+    end);
+
+  App.Delete('/products/:id',
+    procedure(Req: THorseRequest; Res: THorseResponse; Next: TProc)
+    begin
+      RoleMiddleware(Req, Res,
+        procedure
+        begin
+          ProductController.DeleteItem(Req, Res);
+        end, urAdmin);
+    end);
+end;
+
+procedure ConfigureStockOfficerRoutes(App: THorse; ProductController: TProductController);
+begin
+  App.Post('/products/:id/sell',
+    procedure(Req: THorseRequest; Res: THorseResponse; Next: TProc)
+    begin
+      RoleMiddleware(Req, Res,
+        procedure
+        begin
+          ProductController.SellItem(Req, Res);
+        end, urStockOfficer);
+    end);
+end;
+
+procedure ConfigureProductRoutes(App: THorse; ProductController: TProductController);
+begin
+  App.Get('/products',
+    procedure(Req: THorseRequest; Res: THorseResponse; Next: TProc)
+    begin
+      ProductController.GetItems(Req, Res);
+    end);
+
+  App.Get('/products/:id',
+    procedure(Req: THorseRequest; Res: THorseResponse; Next: TProc)
+    begin
+      ProductController.GetItemById(Req, Res);
+    end);
+
+  App.Get('/notifications',
+    procedure(Req: THorseRequest; Res: THorseResponse; Next: TProc)
+    begin
+      ProductController.GetNotifications(Req, Res);
+    end);
+end;
 
 var
   App: THorse;
@@ -33,128 +281,53 @@ var
 
 begin
   try
-    // Initialize Database
     DatabaseModule1 := TDatabaseConnection.Create;
     try
       DatabaseModule1.Connect;
 
-      // Create Horse instance
       App := THorse.Create;
-
-      // Initialize Services
-      AuthService := TAuthService.Create;
-      ProductService := TProductService.Create;
-
       try
-        // Initialize Controllers
-        AuthController := TAuthController.Create(AuthService);
-        ProductController := TProductController.Create(ProductService);
-
+        AuthService := TAuthService.Create;
+        ProductService := TProductService.Create;
         try
-          // Initialize Horse Middleware
-          App.Use(Jhonson());
-          App.Use(TAuthMiddleware.Middleware);
+          AuthController := TAuthController.Create(AuthService);
+          ProductController := TProductController.Create(ProductService);
+          try
+            // Configure Middleware
+            App.Use(Jhonson);
+            App.Use(CORS);
 
+            // Configure Routes
+            ConfigurePublicRoutes(App, AuthController);
+            App.Use(AuthMiddleware);  // Add Authentication Middleware for protected routes
 
-          // Configure CORS
-             ConfigureCORS(App);
+            // Configure Protected Routes
+            ConfigureUserRoutes(App, AuthController);
+            ConfigureAdminRoutes(App, ProductController);
+            ConfigureStockOfficerRoutes(App, ProductController);
+            ConfigureProductRoutes(App, ProductController);
 
+            // Start server
+            WriteLn('Starting server on port 8000...');
+            App.Listen(8000);
+            WriteLn('Server is running on port 8000');
+            WriteLn('Press Enter to stop...');
+            ReadLn;
 
-          // Register Authentication Routes
-          App.Post('/auth/register',
-            procedure(Req: THorseRequest; Res: THorseResponse; Next: TProc)
-            begin
-              AuthController.Register(Req, Res);
-            end);
-
-          App.Post('/auth/login',
-            procedure(Req: THorseRequest; Res: THorseResponse; Next: TProc)
-            begin
-              AuthController.Login(Req, Res);
-            end);
-
-          // Protected User Routes
-          App.Get('/users/:id',
-            procedure(Req: THorseRequest; Res: THorseResponse; Next: TProc)
-            begin
-              AuthController.GetUserProfile(Req, Res);
-            end);
-
-          App.Put('/users/:id',
-            procedure(Req: THorseRequest; Res: THorseResponse; Next: TProc)
-            begin
-              AuthController.UpdateUserProfile(Req, Res);
-            end);
-
-          // Protected Product Routes
-          App.Post('/products',
-            procedure(Req: THorseRequest; Res: THorseResponse; Next: TProc)
-            begin
-              ProductController.AddItem(Req, Res);
-            end);
-
-          App.Get('/products',
-            procedure(Req: THorseRequest; Res: THorseResponse; Next: TProc)
-            begin
-              ProductController.GetItems(Req, Res);
-            end);
-
-          App.Get('/products/:id',
-            procedure(Req: THorseRequest; Res: THorseResponse; Next: TProc)
-            begin
-              ProductController.GetItemById(Req, Res);
-            end);
-
-          App.Put('/products/:id',
-            procedure(Req: THorseRequest; Res: THorseResponse; Next: TProc)
-            begin
-              ProductController.UpdateItem(Req, Res);
-            end);
-
-          App.Delete('/products/:id',
-            procedure(Req: THorseRequest; Res: THorseResponse; Next: TProc)
-            begin
-              ProductController.DeleteItem(Req, Res);
-            end);
-
-          App.Post('/products/:id/sell',
-            procedure(Req: THorseRequest; Res: THorseResponse; Next: TProc)
-            begin
-              ProductController.SellItem(Req, Res);
-            end);
-
-            App.Get('/notifications',
-            procedure(Req: THorseRequest; Res: THorseResponse; Next: TProc)
-            begin
-              ProductController.GetNotifications(Req, Res);
-            end);
-
-          // Start Server
-          WriteLn('Starting server on port 8080...');
-          App.Listen(8080);
-          WriteLn('Server is running on port 8080');
-          WriteLn('Press Enter to stop...');
-          ReadLn;
-
-        finally
-          if Assigned(ProductController) then
+          finally
             ProductController.Free;
-          if Assigned(AuthController) then
             AuthController.Free;
-        end;
-
-      finally
-        if Assigned(ProductService) then
+          end;
+        finally
           ProductService.Free;
-        if Assigned(AuthService) then
           AuthService.Free;
+        end;
+      finally
+        App.Free;
       end;
-
     finally
-      if Assigned(DatabaseModule1) then
-        DatabaseModule1.Free;
+      DatabaseModule1.Free;
     end;
-
   except
     on E: Exception do
     begin

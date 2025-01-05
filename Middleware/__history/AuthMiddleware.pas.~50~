@@ -1,0 +1,164 @@
+unit AuthMiddleware;
+
+interface
+
+uses
+  Horse,
+  Horse.Core.RouterTree,
+  Horse.Core.Route,
+  Horse.Request,
+  Horse.Response,
+  Horse.Commons,
+  Web.HTTPApp,
+  System.SysUtils,
+  System.JSON,
+  System.Classes,
+  System.Generics.Collections,
+  Data.DB,
+  JWTManager,
+  UserModel;
+
+procedure ConfigureAuthMiddleware(App: THorse);
+
+implementation
+
+procedure HandleAuthError(Res: THorseResponse; const ErrorMessage: string; StatusCode: Integer = 401);
+var
+  ErrorObj: TJSONObject;
+begin
+  ErrorObj := TJSONObject.Create;
+  try
+    ErrorObj.AddPair('error', ErrorMessage);
+    Res.Status(StatusCode)
+       .ContentType('application/json')
+       .Send<TJSONObject>(ErrorObj);
+  except
+    ErrorObj.Free;
+    raise;
+  end;
+end;
+
+function ExtractAndValidateToken(Req: THorseRequest; Res: THorseResponse; out Claims: TJWTClaims): Boolean;
+var
+  AuthHeader: string;
+  Token: string;
+begin
+  Result := False;
+
+  // Get Authorization header
+  AuthHeader := Req.Headers['Authorization'];
+  if AuthHeader.IsEmpty then
+  begin
+    HandleAuthError(Res, 'Authorization header is required');
+    Exit;
+  end;
+
+  // Check Bearer format
+  if not AuthHeader.StartsWith('Bearer ', True) then
+  begin
+    HandleAuthError(Res, 'Invalid authorization format. Use Bearer token');
+    Exit;
+  end;
+
+  // Extract token
+  Token := AuthHeader.Substring(7);
+
+  // Validate token
+  if not TJWTManager.ValidateToken(Token, Claims) then
+  begin
+    HandleAuthError(Res, 'Invalid or expired token');
+    Exit;
+  end;
+
+  Result := True;
+end;
+
+procedure ApplyAuthMiddleware(Req: THorseRequest; Res: THorseResponse; Next: TProc);
+var
+  Claims: TJWTClaims;
+begin
+  try
+    // Skip authentication for public endpoints
+    if (Req.RawWebRequest.PathInfo = '/auth/login') or
+       (Req.RawWebRequest.PathInfo = '/auth/register') or
+       (Req.RawWebRequest.PathInfo = '/notifications') then
+    begin
+      Next;
+      Exit;
+    end;
+
+    // Validate token and extract claims
+    if not ExtractAndValidateToken(Req, Res, Claims) then
+      Exit;
+
+    // Store claims in request for later use
+    Req.Query.Dictionary.AddOrSetValue('user-id', Claims.UserId.ToString);
+    Req.Query.Dictionary.AddOrSetValue('user-role', IntToStr(Integer(Claims.Role)));
+    Req.Query.Dictionary.AddOrSetValue('username', Claims.Username);
+
+    Next;
+  except
+    on E: Exception do
+    begin
+      HandleAuthError(Res, 'Authentication error: ' + E.Message, 500);
+    end;
+  end;
+end;
+
+procedure CheckAdminAccess(Req: THorseRequest; Res: THorseResponse; Next: TProc);
+var
+  UserRole: TUserRole;
+begin
+  UserRole := TUserRole(StrToIntDef(Req.Query['user-role'], 0));
+
+  if UserRole <> urAdmin then
+  begin
+    HandleAuthError(Res, 'Admin access required', 403);
+    Exit;
+  end;
+
+  Next;
+end;
+
+procedure CheckStockOfficerOrAdminAccess(Req: THorseRequest; Res: THorseResponse; Next: TProc);
+var
+  UserRole: TUserRole;
+begin
+  UserRole := TUserRole(StrToIntDef(Req.Query['user-role'], 0));
+
+  if not (UserRole in [urAdmin, urStockOfficer]) then
+  begin
+    HandleAuthError(Res, 'Stock officer or admin access required', 403);
+    Exit;
+  end;
+
+  Next;
+end;
+
+procedure ConfigureAuthMiddleware(App: THorse);
+begin
+  // Apply global authentication middleware
+  App.Use(ApplyAuthMiddleware);
+
+  // Configure route-specific middleware
+  // GET /products - Stock officers and admins can view products
+  App.Get('/products', CheckStockOfficerOrAdminAccess);
+  App.Get('/products/:id', CheckStockOfficerOrAdminAccess);
+
+  // POST /products - Only admins can create products
+  App.Post('/products', CheckAdminAccess);
+
+  // PUT /products/:id - Only admins can update products
+  App.Put('/products/:id', CheckAdminAccess);
+
+  // DELETE /products/:id - Only admins can delete products
+  App.Delete('/products/:id', CheckAdminAccess);
+
+  // POST /products/:id/sell - Stock officers and admins can sell products
+  App.Post('/products/:id/sell', CheckStockOfficerOrAdminAccess);
+
+  // GET /notifications - No auth required, public endpoint
+  // This endpoint is already handled in the ApplyAuthMiddleware skip list
+end;
+
+end.
