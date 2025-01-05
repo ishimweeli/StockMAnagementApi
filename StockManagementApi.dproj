@@ -93,9 +93,7 @@
         <DCCReference Include="Service\ProductService.pas"/>
         <DCCReference Include="Controller\UserController.pas"/>
         <DCCReference Include="Controller\ProductController.pas"/>
-        <DCCReference Include="Middleware\AuthMiddleware.pas"/>
         <DCCReference Include="Utils\JsonResponseHelper.pas"/>
-        <DCCReference Include="Utils\JWTManager.pas"/>
         <DCCReference Include="Middleware\CORSMiddleware.pas"/>
         <DCCReference Include="Models\NotificationModel.pas"/>
         <BuildConfiguration Include="Base">

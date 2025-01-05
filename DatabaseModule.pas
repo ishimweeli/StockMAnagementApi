@@ -160,18 +160,13 @@ begin
   try
     StartTransaction;
     try
-      // Update from version 1 to 2 (adding initial_quantity)
+
       if FromVersion < 2 then
       begin
         ExecuteSQL('ALTER TABLE products ADD COLUMN initial_quantity INTEGER NOT NULL DEFAULT 0');
         ExecuteSQL('UPDATE products SET initial_quantity = quantity WHERE initial_quantity = 0');
       end;
 
-      // Add more version updates here as needed
-      // if FromVersion < 3 then
-      // begin
-      //   -- Add new schema changes for version 3
-      // end;
 
       UpdateSchemaVersion(LATEST_SCHEMA_VERSION);
       Commit;
@@ -218,7 +213,7 @@ const
     '  id INTEGER PRIMARY KEY AUTOINCREMENT,' +
     '  product_id INTEGER NOT NULL,' +
     '  product_name VARCHAR(100) NOT NULL,' +
-    '  notification_type INTEGER NOT NULL,' + // 0 for LowStock, 1 for CriticalStock
+    '  notification_type INTEGER NOT NULL,' +
     '  message TEXT NOT NULL,' +
     '  created_at DATETIME DEFAULT CURRENT_TIMESTAMP,' +
     '  FOREIGN KEY (product_id) REFERENCES products(id) ON DELETE CASCADE' +
@@ -240,7 +235,7 @@ const
     '  id INTEGER PRIMARY KEY AUTOINCREMENT,' +
     '  username VARCHAR(50) NOT NULL UNIQUE,' +
     '  password VARCHAR(255) NOT NULL,' +
-    '  role INTEGER NOT NULL,' +  // 0 for Admin, 1 for StockOfficer
+    '  role INTEGER NOT NULL,' +
     '  email VARCHAR(100) NOT NULL UNIQUE,' +
     '  created_at DATETIME DEFAULT CURRENT_TIMESTAMP,' +
     '  updated_at DATETIME DEFAULT CURRENT_TIMESTAMP' +

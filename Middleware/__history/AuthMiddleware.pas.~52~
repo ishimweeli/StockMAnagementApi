@@ -1,0 +1,175 @@
+unit AuthMiddleware;
+
+interface
+
+uses
+  Horse,
+  Horse.Core.RouterTree,
+  Horse.Core.Route,
+  Horse.Request,
+  Horse.Response,
+  Horse.Commons,
+  Web.HTTPApp,
+  System.SysUtils,
+  System.JSON,
+  System.Classes,
+  System.Generics.Collections,
+  Data.DB,
+  JWTManager,
+  UserModel;
+
+type
+  TAuthMiddleware = class
+  public
+    class function ValidateAuth: THorseCallback;
+    class function CheckAdminAccess: THorseCallback;
+    class function CheckStockOfficerOrAdminAccess: THorseCallback;
+  end;
+
+procedure ConfigureAuthMiddleware(App: THorse);
+
+implementation
+
+procedure HandleAuthError(Res: THorseResponse; const ErrorMessage: string; StatusCode: Integer = 401);
+var
+  ErrorObj: TJSONObject;
+begin
+  ErrorObj := TJSONObject.Create;
+  try
+    ErrorObj.AddPair('error', ErrorMessage);
+    Res.Status(StatusCode)
+       .ContentType('application/json')
+       .Send<TJSONObject>(ErrorObj);
+  except
+    ErrorObj.Free;
+    raise;
+  end;
+end;
+
+function ExtractAndValidateToken(Req: THorseRequest; Res: THorseResponse; out Claims: TJWTClaims): Boolean;
+var
+  AuthHeader: string;
+  Token: string;
+begin
+  Result := False;
+
+  // Get Authorization header
+  AuthHeader := Req.Headers['Authorization'];
+  if AuthHeader.IsEmpty then
+  begin
+    HandleAuthError(Res, 'Authorization header is required');
+    Exit;
+  end;
+
+  // Check Bearer format
+  if not AuthHeader.StartsWith('Bearer ', True) then
+  begin
+    HandleAuthError(Res, 'Invalid authorization format. Use Bearer token');
+    Exit;
+  end;
+
+  // Extract token
+  Token := AuthHeader.Substring(7);
+
+  // Validate token
+  if not TJWTManager.ValidateToken(Token, Claims) then
+  begin
+    HandleAuthError(Res, 'Invalid or expired token');
+    Exit;
+  end;
+
+  Result := True;
+end;
+
+function IsPublicEndpoint(const Path: string): Boolean;
+begin
+  Result := (Path = '/auth/login') or
+            (Path = '/auth/register') or
+            (Path = '/notifications') or
+            Path.StartsWith('/auth/');
+end;
+
+class function TAuthMiddleware.ValidateAuth: THorseCallback;
+begin
+  Result := procedure(Req: THorseRequest; Res: THorseResponse; Next: TProc)
+  var
+    Claims: TJWTClaims;
+  begin
+    try
+      // Skip authentication for public endpoints
+      if IsPublicEndpoint(Req.RawWebRequest.PathInfo) then
+      begin
+        Next;
+        Exit;
+      end;
+
+      // Validate token and extract claims
+      if not ExtractAndValidateToken(Req, Res, Claims) then
+        Exit;
+
+      // Store claims in request for later use
+      Req.Query.Dictionary.AddOrSetValue('user-id', Claims.UserId.ToString);
+      Req.Query.Dictionary.AddOrSetValue('user-role', IntToStr(Integer(Claims.Role)));
+      Req.Query.Dictionary.AddOrSetValue('username', Claims.Username);
+
+      Next;
+    except
+      on E: Exception do
+      begin
+        HandleAuthError(Res, 'Authentication error: ' + E.Message, 500);
+      end;
+    end;
+  end;
+end;
+
+class function TAuthMiddleware.CheckAdminAccess: THorseCallback;
+begin
+  Result := procedure(Req: THorseRequest; Res: THorseResponse; Next: TProc)
+  var
+    UserRole: TUserRole;
+  begin
+    UserRole := TUserRole(StrToIntDef(Req.Query['user-role'], 0));
+
+    if UserRole <> urAdmin then
+    begin
+      HandleAuthError(Res, 'Admin access required', 403);
+      Exit;
+    end;
+
+    Next;
+  end;
+end;
+
+class function TAuthMiddleware.CheckStockOfficerOrAdminAccess: THorseCallback;
+begin
+  Result := procedure(Req: THorseRequest; Res: THorseResponse; Next: TProc)
+  var
+    UserRole: TUserRole;
+  begin
+    UserRole := TUserRole(StrToIntDef(Req.Query['user-role'], 0));
+
+    if not (UserRole in [urAdmin, urStockOfficer]) then
+    begin
+      HandleAuthError(Res, 'Stock officer or admin access required', 403);
+      Exit;
+    end;
+
+    Next;
+  end;
+end;
+
+procedure ConfigureAuthMiddleware(App: THorse);
+begin
+  // Apply global authentication middleware FIRST
+  App.Use(TAuthMiddleware.ValidateAuth);
+
+  // Configure route-specific middleware
+  App.Get('/products', TAuthMiddleware.CheckStockOfficerOrAdminAccess);
+  App.Get('/products/:id', TAuthMiddleware.CheckStockOfficerOrAdminAccess);
+  App.Post('/products', TAuthMiddleware.CheckAdminAccess);
+  App.Put('/products/:id', TAuthMiddleware.CheckAdminAccess);
+  App.Delete('/products/:id', TAuthMiddleware.CheckAdminAccess);
+  App.Post('/products/:id/sell', TAuthMiddleware.CheckStockOfficerOrAdminAccess);
+end;
+
+end.

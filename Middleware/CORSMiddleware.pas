@@ -1,4 +1,4 @@
-// First, update the CORSMiddleware.pas
+
 unit CORSMiddleware;
 
 interface
@@ -16,9 +16,9 @@ begin
     procedure(Req: THorseRequest; Res: THorseResponse; Next: TProc)
     begin
       // Set CORS headers
-      Res.RawWebResponse.SetCustomHeader('Access-Control-Allow-Origin', '*');  // Or your specific origin
+      Res.RawWebResponse.SetCustomHeader('Access-Control-Allow-Origin', '*');
       Res.RawWebResponse.SetCustomHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
-      Res.RawWebResponse.SetCustomHeader('Access-Control-Allow-Headers', '*');
+      Res.RawWebResponse.SetCustomHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
       Res.RawWebResponse.SetCustomHeader('Access-Control-Allow-Credentials', 'true');
 
       // Handle preflight requests

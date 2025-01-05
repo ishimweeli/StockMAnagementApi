@@ -345,11 +345,11 @@ begin
         case Result of
           snLowQuantity:
             CreateNotification(ItemId, Item.Name, ntLowStock,
-              Format('Product "%s" quantity less than a quarter of initial stock (%d%%)',
+              Format('Product "%s" quantity less than a quarter      (%d%%)',
                 [Item.Name, Round((NewQuantity / InitialQuantity) * 100)]));
           snCriticalQuantity:
             CreateNotification(ItemId, Item.Name, ntCriticalStock,
-              Format('Product "%s" quantity nearing zero (%d%%)',
+              Format('Product "%s" quantity nearing zero   (%d%%)',
                 [Item.Name, Round((NewQuantity / InitialQuantity) * 100)]));
         end;
 

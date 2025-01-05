@@ -23,6 +23,7 @@ type
     Path: string;
     Method: string;
     RequiredRoles: TArray<TUserRole>;
+    constructor Create(const APath, AMethod: string; const ARoles: TArray<TUserRole>);
   end;
 
   TAuthMiddleware = class
@@ -36,12 +37,22 @@ type
     class function IsPublicPath(const Path: string): Boolean;
     class function MatchRoute(const Path, Method: string; out RequiredRoles: TArray<TUserRole>): Boolean;
     class function NormalizePath(const Path: string): string;
+    class function MethodToString(Method: Web.HTTPApp.TMethodType; const CustomMethod: string = ''): string;
   public
     class constructor Create;
     class function Middleware: THorseCallback;
   end;
 
 implementation
+
+{ TRouteAccess }
+
+constructor TRouteAccess.Create(const APath, AMethod: string; const ARoles: TArray<TUserRole>);
+begin
+  Path := APath;
+  Method := AMethod;
+  RequiredRoles := ARoles;
+end;
 
 { TAuthMiddleware }
 
@@ -67,6 +78,7 @@ class function TAuthMiddleware.NormalizePath(const Path: string): string;
 var
   Parts: TArray<string>;
   I: Integer;
+  TempInt: Integer;
 begin
   // Remove leading slash and convert to lowercase
   Result := Path.ToLower;
@@ -76,10 +88,25 @@ begin
   // Replace numeric values with :id placeholder
   Parts := Result.Split(['/']);
   for I := 0 to High(Parts) do
-    if TryStrToInt(Parts[I], var Temp) then
+    if TryStrToInt(Parts[I], TempInt) then
       Parts[I] := ':id';
 
   Result := string.Join('/', Parts);
+end;
+
+class function TAuthMiddleware.MethodToString(Method: Web.HTTPApp.TMethodType; const CustomMethod: string = ''): string;
+begin
+  case Method of
+    mtGet: Result := 'GET';
+    mtPost: Result := 'POST';
+    mtPut: Result := 'PUT';
+    mtDelete: Result := 'DELETE';
+    mtPatch: Result := 'PATCH';
+    mtHead: Result := 'HEAD';
+  else
+    // Handle unsupported HTTP methods using a custom string
+    Result := CustomMethod.ToUpper;
+  end;
 end;
 
 class function TAuthMiddleware.MatchRoute(const Path, Method: string; out RequiredRoles: TArray<TUserRole>): Boolean;
@@ -88,7 +115,7 @@ var
   Route: TRouteAccess;
 begin
   Result := False;
-  RequiredRoles := [];
+  SetLength(RequiredRoles, 0);
   NormalizedPath := NormalizePath(Path);
 
   for Route in FProtectedRoutes do
@@ -207,7 +234,7 @@ begin
         end;
 
         // Check route-specific permissions
-        if MatchRoute(Path, Req.MethodAsString, RequiredRoles) then
+        if MatchRoute(Path, MethodToString(Req.MethodType), RequiredRoles) then
         begin
           if not HasRequiredRole(Claims.Role, RequiredRoles) then
           begin
@@ -244,3 +271,4 @@ begin
 end;
 
 end.
+
